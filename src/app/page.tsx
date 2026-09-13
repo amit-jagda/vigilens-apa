@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
+import Link from 'next/link';
 import toast from 'react-hot-toast';
 import {
   Upload,
@@ -44,10 +45,16 @@ import {
   Navigation,
   Footprints,
   AlertTriangle,
+  LayoutGrid,
+  List,
 } from 'lucide-react';
 
 import { LineDrawingCanvas } from '@/components/LineDrawingCanvas';
 import { CameraTopologyGraph } from '@/components/CameraTopologyGraph';
+import { DailyCheckinModal } from '@/components/people/DailyCheckinModal';
+import { SearchByPhotoModal } from '@/components/people/SearchByPhotoModal';
+import { ReviewQueueBanner } from '@/components/people/ReviewQueueBanner';
+import { HourlyDwellChart } from '@/components/people/HourlyDwellChart';
 import {
   createCameraNode,
   updateCameraNode,
@@ -68,6 +75,7 @@ import {
   triggerCrossCameraAssociation,
   resetAnalyticsData,
   deleteAdvancedSession,
+  rerunAdvancedSession,
 } from '@/lib/api/advancedpeopleanalytics';
 import { uploadGalleryMedia, listGalleryMedia, getGalleryMediaUrl } from '@/lib/api/gallery';
 import { getMediaCropUrl } from '@/lib/apiClient';
@@ -81,36 +89,110 @@ import type {
   PersonTimelineResponse,
   TimelineEventItem,
 } from '@/types/advancedpeopleanalytics';
+import { useApaStore } from '@/stores/apaStore';
 
 function VigilensAPAMainContent() {
   const searchParams = useSearchParams();
   const initialSessionId = searchParams.get('sessionId');
 
-  // Top-level Navigation Mode: 'analytics' | 'people' | 'history'
-  const [mainTab, setMainTab] = useState<'analytics' | 'people' | 'history'>('analytics');
+  // Zustand Store (Persistent & Modular State)
+  const {
+    mainTab,
+    setMainTab,
+    activeStep,
+    setActiveStep,
+    topologyViewMode,
+    setTopologyViewMode,
+    selectedJourneyDate,
+    setSelectedJourneyDate,
+    similarityThreshold,
+    setSimilarityThreshold,
+    confidenceThreshold,
+    setConfidenceThreshold,
+    trackEmployees,
+    setTrackEmployees,
+    registerNewVisitors,
+    setRegisterNewVisitors,
+    trackRepeatVisitors,
+    setTrackRepeatVisitors,
+    lineCrossingAnalysis,
+    setLineCrossingAnalysis,
+    trackOccupancy,
+    setTrackOccupancy,
+    generateVideo,
+    setGenerateVideo,
+    enableTimeRange,
+    setEnableTimeRange,
+    startTimeSec,
+    setStartTimeSec,
+    endTimeSec,
+    setEndTimeSec,
+    selectedCameraId,
+    setSelectedCameraId,
+    isCreatingCamera,
+    setIsCreatingCamera,
+    isCreatingLink,
+    setIsCreatingLink,
+    linkFromCameraId,
+    setLinkFromCameraId,
+    linkToCameraId,
+    setLinkToCameraId,
+    linkMinTransit,
+    setLinkMinTransit,
+    linkAvgTransit,
+    setLinkAvgTransit,
+    linkMaxTransit,
+    setLinkMaxTransit,
+    linkBidirectional,
+    setLinkBidirectional,
+    lineStart,
+    setLineStart,
+    lineEnd,
+    setLineEnd,
+    lineDrawnConfirmed,
+    setLineDrawnConfirmed,
+    showLineCanvas,
+    setShowLineCanvas,
+    activeSessionId,
+    setActiveSessionId,
+  } = useApaStore();
+
   const [selectedPersonForJourney, setSelectedPersonForJourney] = useState<PersonSummaryItem | null>(null);
-  const [selectedJourneyDate, setSelectedJourneyDate] = useState<string>('all');
+  const [isDailyCheckinOpen, setIsDailyCheckinOpen] = useState(false);
+  const [isSearchByPhotoOpen, setIsSearchByPhotoOpen] = useState(false);
 
-  // Stepper Sub-tabs for Video Analytics: 1 (Topology & Setup) | 2 (Processing) | 3 (Dashboard Stream / Results)
-  const [activeStep, setActiveStep] = useState<1 | 2 | 3>(1);
-
-  // Video Source & Upload State
+  // Video Source & Upload Local State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [uploadedVideos, setUploadedVideos] = useState<GalleryMedia[]>([]);
   const [selectedUploadedVideo, setSelectedUploadedVideo] = useState<GalleryMedia | null>(null);
   const [videoPreviewUrl, setVideoPreviewUrl] = useState<string>('');
   const [isUploading, setIsUploading] = useState(false);
   const [isDragOver, setIsDragOver] = useState(false);
+  const previewVideoRef = React.useRef<HTMLVideoElement>(null);
 
-  // Camera Node & Topology State
+  const formatSecondsToTime = (seconds: number | null | undefined): string => {
+    if (seconds === null || seconds === undefined || isNaN(seconds)) return '';
+    const mins = Math.floor(seconds / 60);
+    const secs = Math.floor(seconds % 60);
+    return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+  };
+
+  const parseTimeToSeconds = (val: string): number | null => {
+    if (!val || !val.trim()) return null;
+    const parts = val.trim().split(':').map((p) => parseFloat(p));
+    if (parts.some((p) => isNaN(p))) return null;
+    if (parts.length === 1) return parts[0];
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    return null;
+  };
+
+  // Camera Node Local State
   const [cameraNodes, setCameraNodes] = useState<CameraNode[]>([]);
   const [cameraLinks, setCameraLinks] = useState<CameraNodeLink[]>([]);
-  const [selectedCameraId, setSelectedCameraId] = useState<string>('');
-  const [isCreatingCamera, setIsCreatingCamera] = useState(false);
   const [newCameraName, setNewCameraName] = useState('');
   const [newCameraLabel, setNewCameraLabel] = useState('');
   const [newCameraIsEntryPoint, setNewCameraIsEntryPoint] = useState(false);
-  const [topologyViewMode, setTopologyViewMode] = useState<'graph' | 'list'>('graph');
   const cameraCarouselRef = React.useRef<HTMLDivElement>(null);
 
   const scrollCameraCarousel = (direction: 'left' | 'right') => {
@@ -123,42 +205,64 @@ function VigilensAPAMainContent() {
     }
   };
 
-  // Camera Link Modal State
-  const [isCreatingLink, setIsCreatingLink] = useState(false);
-  const [linkFromCameraId, setLinkFromCameraId] = useState('');
-  const [linkToCameraId, setLinkToCameraId] = useState('');
-  const [linkMinTransit, setLinkMinTransit] = useState<number>(5);
-  const [linkAvgTransit, setLinkAvgTransit] = useState<number>(30);
-  const [linkMaxTransit, setLinkMaxTransit] = useState<number>(120);
-  const [linkBidirectional, setLinkBidirectional] = useState(true);
-
-  // Line Crossing Vector State (Optional gate counter)
-  const [lineStart, setLineStart] = useState<[number, number]>([100, 300]);
-  const [lineEnd, setLineEnd] = useState<[number, number]>([500, 300]);
-  const [lineDrawnConfirmed, setLineDrawnConfirmed] = useState(false);
-  const [showLineCanvas, setShowLineCanvas] = useState(false);
-
-  // Thresholds & Feature Toggles
-  const [similarityThreshold, setSimilarityThreshold] = useState<number>(0.60);
-  const [confidenceThreshold, setConfidenceThreshold] = useState<number>(0.30);
-  const [trackEmployees, setTrackEmployees] = useState(true);
-  const [registerNewVisitors, setRegisterNewVisitors] = useState(true);
-  const [trackRepeatVisitors, setTrackRepeatVisitors] = useState(true);
-  const [lineCrossingAnalysis, setLineCrossingAnalysis] = useState(true);
-  const [trackOccupancy, setTrackOccupancy] = useState(true);
-
   // Processing & Polling State
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [sessionData, setSessionData] = useState<AdvancedAnalyticsSession | null>(null);
   const [detectedPeople, setDetectedPeople] = useState<SessionDetectedPerson[]>([]);
   const [isLoadingPeople, setIsLoadingPeople] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAssociating, setIsAssociating] = useState(false);
+  const [playbackCurrentTime, setPlaybackCurrentTime] = useState<number>(0);
+  const [detectedViewMode, setDetectedViewMode] = useState<'grid' | 'list'>('grid');
+  const playbackVideoRef = React.useRef<HTMLVideoElement>(null);
+
+  const handleSeekVideoToTime = (timeSec: number) => {
+    if (playbackVideoRef.current) {
+      const isAnnotatedTrimmed = Boolean(sessionData?.output_video_path && (sessionData?.start_time_sec ?? 0) > 0);
+      const targetTime = isAnnotatedTrimmed
+        ? Math.max(0, timeSec - (sessionData?.start_time_sec || 0))
+        : Math.max(0, timeSec);
+
+      try {
+        playbackVideoRef.current.currentTime = targetTime;
+        const playPromise = playbackVideoRef.current.play();
+        if (playPromise !== undefined) {
+          playPromise.catch((err) => {
+            console.warn('Auto-play after seek was prevented by browser:', err);
+          });
+        }
+      } catch (err) {
+        console.error('Error seeking video:', err);
+      }
+
+      playbackVideoRef.current.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  };
+
+  const handlePhotoSearchSeek = async (sessionId: string, offsetSeconds: number) => {
+    if (sessionId && sessionId !== activeSessionId) {
+      setActiveSessionId(sessionId);
+      try {
+        const res = await getSessionDetails(sessionId);
+        if (res?.data) {
+          setSessionData(res.data);
+        }
+      } catch (err) {
+        console.error('Error fetching session details:', err);
+      }
+      fetchDetectedPeople(sessionId);
+    }
+    setMainTab('analytics');
+    setActiveStep(3);
+    setTimeout(() => {
+      handleSeekVideoToTime(offsetSeconds);
+    }, 300);
+  };
 
   // Past Sessions History State
   const [pastSessions, setPastSessions] = useState<AdvancedAnalyticsSession[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null);
+  const [rerunningSessionId, setRerunningSessionId] = useState<string | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<AdvancedAnalyticsSession | null>(null);
 
   // Camera To Delete & Edit Modals
@@ -482,6 +586,14 @@ function VigilensAPAMainContent() {
     const effectiveLineStart = customLineStart || (lineDrawnConfirmed ? lineStart : undefined);
     const effectiveLineEnd = customLineEnd || (lineDrawnConfirmed ? lineEnd : undefined);
 
+    if (enableTimeRange && startTimeSec !== null && endTimeSec !== null && endTimeSec <= startTimeSec) {
+      toast.error('Time Range error: End time must be greater than Start time.');
+      return;
+    }
+
+    const effectiveStartTime = enableTimeRange && startTimeSec !== null && startTimeSec >= 0 ? startTimeSec : undefined;
+    const effectiveEndTime = enableTimeRange && endTimeSec !== null && endTimeSec > 0 ? endTimeSec : undefined;
+
     setIsSubmitting(true);
     try {
       let mediaId = selectedUploadedVideo?.id;
@@ -518,6 +630,8 @@ function VigilensAPAMainContent() {
             video_source_type: 'upload',
             line_start: lineCrossingAnalysis ? effectiveLineStart : undefined,
             line_end: lineCrossingAnalysis ? effectiveLineEnd : undefined,
+            start_time: effectiveStartTime,
+            end_time: effectiveEndTime,
           },
         ],
         global_line_start: lineCrossingAnalysis ? effectiveLineStart : undefined,
@@ -529,6 +643,9 @@ function VigilensAPAMainContent() {
         track_repeat_visitors: trackRepeatVisitors,
         line_crossing_analysis: lineCrossingAnalysis,
         track_occupancy: trackOccupancy,
+        generate_video: generateVideo,
+        start_time: effectiveStartTime,
+        end_time: effectiveEndTime,
       });
 
       if (res?.data && res.data.length > 0) {
@@ -598,6 +715,27 @@ function VigilensAPAMainContent() {
     fetchDetectedPeople(session.id);
     setMainTab('analytics');
     toast.success(`Loaded session "${session.video_name}"`);
+  };
+
+  // Rerun Past Session
+  const handleRerunPastSession = async (session: AdvancedAnalyticsSession) => {
+    setRerunningSessionId(session.id);
+    try {
+      const res = await rerunAdvancedSession(session.id);
+      if (res?.data) {
+        toast.success(`Rerunning analysis for "${session.video_name}"...`);
+        setActiveSessionId(session.id);
+        setSessionData(res.data);
+        setActiveStep(2);
+        setMainTab('analytics');
+      } else {
+        toast.error(res?.message || 'Failed to rerun session');
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to rerun session');
+    } finally {
+      setRerunningSessionId(null);
+    }
   };
 
   // Delete Session
@@ -714,6 +852,30 @@ function VigilensAPAMainContent() {
               Spatio-temporal camera topology, segmentation ReID, multi-camera journeys, and dwell analytics
             </p>
           </div>
+        </div>
+
+        {/* Global Action Header Controls */}
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            type="button"
+            onClick={() => setIsSearchByPhotoOpen(true)}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
+          >
+            <Camera className="h-4 w-4" />
+            <span>Search by Photo</span>
+            <span className="px-1.5 py-0.2 rounded text-[9px] bg-white/20 uppercase tracking-wide font-mono">
+              Vector DB
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsDailyCheckinOpen(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-accent text-foreground text-xs font-semibold shadow-sm transition-all cursor-pointer"
+          >
+            <UserCheck className="h-4 w-4 text-emerald-400" />
+            <span>Daily Check-in</span>
+          </button>
         </div>
       </div>
 
@@ -1220,6 +1382,7 @@ function VigilensAPAMainContent() {
                           {/* Live Video Thumbnail / Preview Player */}
                           <div className="relative w-full max-w-md aspect-video rounded-xl overflow-hidden border border-border/80 bg-black shadow-lg">
                             <video
+                              ref={previewVideoRef}
                               src={videoPreviewUrl}
                               controls
                               playsInline
@@ -1318,6 +1481,173 @@ function VigilensAPAMainContent() {
                             );
                           })}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Time Range / Sub-Clip Slicing Component */}
+                    {(selectedFile || selectedUploadedVideo) && (
+                      <div className="mt-4 rounded-xl border border-border bg-accent/10 p-4 space-y-3">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2">
+                            <Timer className="h-4 w-4 text-primary" />
+                            <span className="text-xs font-bold text-foreground">Video Time-Range / Sub-Clip</span>
+                            <span className="text-[10px] bg-primary/10 text-primary font-semibold px-2 py-0.5 rounded-full">
+                              Optional
+                            </span>
+                          </div>
+
+                          <div className="flex items-center gap-2">
+                            <span className="text-[11px] text-muted-foreground font-medium">
+                              {enableTimeRange ? 'Custom Range (Active)' : 'Entire Footage'}
+                            </span>
+                            <button
+                              type="button"
+                              onClick={() => setEnableTimeRange(!enableTimeRange)}
+                              className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
+                                enableTimeRange ? 'bg-primary' : 'bg-muted-foreground/30'
+                              }`}
+                            >
+                              <div
+                                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                                  enableTimeRange ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </button>
+                          </div>
+                        </div>
+
+                        {enableTimeRange && (
+                          <div className="pt-2 border-t border-border/60 space-y-3 animate-in fade-in duration-200">
+                            <p className="text-[11px] text-muted-foreground">
+                              Process a specific segment of the video (e.g. only 01:00 to 03:30) to speed up analysis and reduce compute:
+                            </p>
+
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {/* Start Time Input */}
+                              <div className="rounded-lg border border-border bg-card p-2.5 space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-[11px] font-semibold text-foreground flex items-center gap-1">
+                                    <span>⏱️ Start Time</span>
+                                    <span className="text-[10px] text-muted-foreground font-mono">(MM:SS or Sec)</span>
+                                  </label>
+                                  {videoPreviewUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (previewVideoRef.current) {
+                                          const cur = Math.floor(previewVideoRef.current.currentTime);
+                                          setStartTimeSec(cur);
+                                          toast.success(`Start time set to ${formatSecondsToTime(cur)}`);
+                                        }
+                                      }}
+                                      className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                                      title="Capture current timestamp from preview video"
+                                    >
+                                      <Play className="h-2.5 w-2.5 fill-current" /> Use Current Time
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="00:00"
+                                    value={startTimeSec !== null ? formatSecondsToTime(startTimeSec) : ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (!val) {
+                                        setStartTimeSec(null);
+                                      } else {
+                                        const secs = parseTimeToSeconds(val);
+                                        setStartTimeSec(secs);
+                                      }
+                                    }}
+                                    className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                                  />
+                                  {startTimeSec !== null && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStartTimeSec(null)}
+                                      className="text-muted-foreground hover:text-foreground text-xs p-1"
+                                      title="Clear start time"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* End Time Input */}
+                              <div className="rounded-lg border border-border bg-card p-2.5 space-y-1.5">
+                                <div className="flex items-center justify-between">
+                                  <label className="text-[11px] font-semibold text-foreground flex items-center gap-1">
+                                    <span>⏱️ End Time</span>
+                                    <span className="text-[10px] text-muted-foreground font-mono">(MM:SS or Sec)</span>
+                                  </label>
+                                  {videoPreviewUrl && (
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        if (previewVideoRef.current) {
+                                          const cur = Math.ceil(previewVideoRef.current.currentTime);
+                                          setEndTimeSec(cur);
+                                          toast.success(`End time set to ${formatSecondsToTime(cur)}`);
+                                        }
+                                      }}
+                                      className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
+                                      title="Capture current timestamp from preview video"
+                                    >
+                                      <Play className="h-2.5 w-2.5 fill-current" /> Use Current Time
+                                    </button>
+                                  )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                  <input
+                                    type="text"
+                                    placeholder="05:00"
+                                    value={endTimeSec !== null ? formatSecondsToTime(endTimeSec) : ''}
+                                    onChange={(e) => {
+                                      const val = e.target.value;
+                                      if (!val) {
+                                        setEndTimeSec(null);
+                                      } else {
+                                        const secs = parseTimeToSeconds(val);
+                                        setEndTimeSec(secs);
+                                      }
+                                    }}
+                                    className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
+                                  />
+                                  {endTimeSec !== null && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setEndTimeSec(null)}
+                                      className="text-muted-foreground hover:text-foreground text-xs p-1"
+                                      title="Clear end time"
+                                    >
+                                      <X className="h-3.5 w-3.5" />
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Dynamic Duration / Range Badge */}
+                            {(startTimeSec !== null || endTimeSec !== null) && (
+                              <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-3 py-1.5 text-xs">
+                                <div className="flex items-center gap-1.5 font-medium text-foreground">
+                                  <span className="text-primary font-bold">🎯 Sub-Clip:</span>
+                                  <span className="font-mono">{formatSecondsToTime(startTimeSec || 0)}</span>
+                                  <span>➔</span>
+                                  <span className="font-mono">{endTimeSec !== null ? formatSecondsToTime(endTimeSec) : 'End of video'}</span>
+                                </div>
+                                {endTimeSec !== null && startTimeSec !== null && endTimeSec > startTimeSec && (
+                                  <span className="font-semibold text-primary font-mono">
+                                    Duration: {endTimeSec - startTimeSec}s ({Math.floor((endTimeSec - startTimeSec) / 60)}m {(endTimeSec - startTimeSec) % 60}s)
+                                  </span>
+                                )}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </div>
                     )}
 
@@ -1459,6 +1789,52 @@ function VigilensAPAMainContent() {
                             className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
                           />
                         </label>
+                      </div>
+
+                      {/* Video Generation Boolean Button & Status Badge */}
+                      <div className="pt-2 border-t border-border">
+                        <div
+                          onClick={() => setGenerateVideo(!generateVideo)}
+                          className={`flex items-start justify-between p-3 rounded-xl border transition-all cursor-pointer select-none ${
+                            generateVideo
+                              ? 'bg-amber-500/10 border-amber-500/30 shadow-sm'
+                              : 'bg-emerald-500/5 border-emerald-500/20 hover:bg-emerald-500/10'
+                          }`}
+                        >
+                          <div className="space-y-1 pr-2">
+                            <div className="flex items-center gap-1.5">
+                              <Video className={`h-4 w-4 ${generateVideo ? 'text-amber-500' : 'text-emerald-500'}`} />
+                              <span className="font-semibold text-xs text-foreground">Generate Annotated Video</span>
+                              <span
+                                className={`text-[10px] font-bold px-1.5 py-0.2 rounded uppercase ${
+                                  generateVideo
+                                    ? 'bg-amber-500/20 text-amber-500'
+                                    : 'bg-emerald-500/20 text-emerald-500'
+                                }`}
+                              >
+                                {generateVideo ? 'Render ON' : 'Fast Mode (Default)'}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-muted-foreground leading-snug">
+                              {generateVideo
+                                ? 'Renders visual bounding boxes onto MP4 video (slower processing & transcoding).'
+                                : 'Stores 100% of attendance, tracks & ReID embeddings in database at maximum speed.'}
+                            </p>
+                          </div>
+                          <div className="pt-0.5">
+                            <div
+                              className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors ${
+                                generateVideo ? 'bg-amber-500' : 'bg-muted-foreground/30'
+                              }`}
+                            >
+                              <div
+                                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                                  generateVideo ? 'translate-x-4' : 'translate-x-0'
+                                }`}
+                              />
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -1666,9 +2042,20 @@ function VigilensAPAMainContent() {
               {/* Video Stream & Action Controls */}
               <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
                 <div className="flex items-center justify-between border-b border-border pb-3">
-                  <h3 className="text-base font-bold text-foreground flex items-center gap-2">
-                    <Play className="h-5 w-5 text-primary" /> Annotated Video Stream
-                  </h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                      <Play className="h-5 w-5 text-primary" /> Video Playback & Verification
+                    </h3>
+                    <span
+                      className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                        sessionData.output_video_path
+                          ? 'bg-amber-500/20 text-amber-500'
+                          : 'bg-emerald-500/20 text-emerald-500'
+                      }`}
+                    >
+                      {sessionData.output_video_path ? 'Annotated Video' : 'Original Footage (DB Stored)'}
+                    </span>
+                  </div>
                   <div className="flex items-center gap-2">
                     <button
                       type="button"
@@ -1699,49 +2086,408 @@ function VigilensAPAMainContent() {
 
                 <div className="relative h-96 w-full rounded-xl overflow-hidden bg-black flex items-center justify-center">
                   <video
+                    ref={playbackVideoRef}
+                    key={sessionData.id}
                     src={getAnnotatedVideoUrl(sessionData.id)}
                     controls
+                    playsInline
+                    preload="auto"
+                    crossOrigin="use-credentials"
+                    onTimeUpdate={(e) => setPlaybackCurrentTime((e.target as HTMLVideoElement).currentTime)}
                     className="h-full w-full object-contain"
                   />
                 </div>
               </div>
 
-              {/* Detected People Cards */}
+              {/* Detected People Cards & List View */}
               <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
-                <h3 className="text-base font-bold text-foreground flex items-center gap-2">
-                  <Users className="h-5 w-5 text-primary" /> Detected Individuals in Footage ({detectedPeople.length})
-                </h3>
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-3">
+                  <div>
+                    <h3 className="text-base font-bold text-foreground flex items-center gap-2">
+                      <Users className="h-5 w-5 text-primary" /> Detected Individuals in Footage ({detectedPeople.length})
+                    </h3>
+                    <p className="text-xs text-muted-foreground mt-0.5">
+                      Sorted chronologically by arrival time. Click any item or &quot;Seek&quot; to jump video directly to their appearance.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                    {/* View Mode Switcher */}
+                    <div className="flex items-center bg-accent/40 p-0.5 rounded-lg border border-border">
+                      <button
+                        type="button"
+                        onClick={() => setDetectedViewMode('grid')}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                          detectedViewMode === 'grid'
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                        title="Cards View"
+                      >
+                        <LayoutGrid className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">Cards</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setDetectedViewMode('list')}
+                        className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                          detectedViewMode === 'list'
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                        title="List View"
+                      >
+                        <List className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">List</span>
+                      </button>
+                    </div>
+
+                    <span className="text-[11px] text-muted-foreground bg-accent/40 px-2.5 py-1 rounded-lg border border-border font-medium">
+                      ⏱️ Video Time: <b className="font-mono text-foreground">{formatSecondsToTime(playbackCurrentTime)}</b>
+                    </span>
+                  </div>
+                </div>
 
                 {detectedPeople.length > 0 ? (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
-                    {detectedPeople.map((p, idx) => (
-                      <div
-                        key={idx}
-                        className="flex flex-col rounded-xl border border-border bg-accent/20 p-3.5 space-y-2 transition-all hover:border-primary/40"
-                      >
-                        <div className="relative h-32 w-full overflow-hidden rounded-lg bg-background border border-border">
-                          {p.crop_url ? (
-                            <img
-                              src={getMediaCropUrl(p.crop_url)}
-                              alt={p.name}
-                              className="h-full w-full object-cover"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full items-center justify-center text-muted-foreground">
-                              <User className="h-8 w-8" />
-                            </div>
-                          )}
-                        </div>
+                  detectedViewMode === 'grid' ? (
+                    /* GRID / CARD VIEW */
+                    <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                      {detectedPeople.map((p, idx) => {
+                        const firstSeen = p.first_seen_sec ?? p.first_seen ?? 0;
+                        const lastSeen = p.last_seen_sec ?? p.last_seen ?? (firstSeen + 1);
+                        const isAnnotatedTrimmed = Boolean(sessionData?.output_video_path && (sessionData?.start_time_sec ?? 0) > 0);
+                        const effectiveVideoTime = isAnnotatedTrimmed
+                          ? playbackCurrentTime + (sessionData?.start_time_sec || 0)
+                          : playbackCurrentTime;
+                        
+                        const isInFrame = p.segments && p.segments.length > 0
+                          ? p.segments.some(
+                              (seg) => effectiveVideoTime >= (seg.first_seen_sec - 0.25) && effectiveVideoTime <= (seg.last_seen_sec + 0.25)
+                            )
+                          : effectiveVideoTime >= (firstSeen - 0.25) && effectiveVideoTime <= (lastSeen + 0.25);
 
-                        <div>
-                          <span className="font-bold text-xs text-foreground block truncate">{p.name}</span>
-                          <span className="text-[10px] text-muted-foreground">
-                            Role: <b className="text-foreground">{p.person_type}</b>
-                          </span>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+                        const dwellSec = p.duration_seconds ?? Math.max(1, Math.round(lastSeen - firstSeen));
+                        const seqNum = p.sequence_number ?? (idx + 1);
+                        const personId = p.identity_id || p.employee_id;
+                        const appearances = p.appearances_count ?? (p.segments?.length || 1);
+
+                        return (
+                          <div
+                            key={idx}
+                            onClick={() => handleSeekVideoToTime(firstSeen)}
+                            className={`group relative flex flex-col rounded-xl border p-3.5 space-y-2.5 transition-all cursor-pointer select-none ${
+                              isInFrame
+                                ? 'border-emerald-500 bg-emerald-500/10 shadow-lg shadow-emerald-500/20 ring-2 ring-emerald-500 scale-[1.02]'
+                                : 'border-border bg-accent/20 hover:border-primary/50 hover:bg-accent/30'
+                            }`}
+                          >
+                            {/* Top Sequence, Re-entry Count & In-Frame Badges */}
+                            <div className="flex items-center justify-between gap-1 flex-wrap">
+                              <div className="flex items-center gap-1.5">
+                                <span className="flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md bg-background/80 border border-border font-mono text-foreground">
+                                  #{seqNum}
+                                </span>
+                                {appearances > 1 && (
+                                  <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-md bg-primary/20 text-primary border border-primary/30" title={`Seen ${appearances} times in this footage`}>
+                                    🔁 {appearances}x
+                                  </span>
+                                )}
+                              </div>
+
+                              {isInFrame ? (
+                                <span className="flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-white animate-pulse shadow-sm">
+                                  <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" /> IN FRAME NOW
+                                </span>
+                              ) : (
+                                <span
+                                  className={`text-[10px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                                    p.person_type === 'employee'
+                                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                      : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                  }`}
+                                >
+                                  {p.person_type === 'employee' ? '👔 Employee' : '👤 Visitor'}
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Photo Crop Preview */}
+                            <div className="relative h-36 w-full overflow-hidden rounded-lg bg-background border border-border">
+                              {p.crop_url ? (
+                                <img
+                                  src={getMediaCropUrl(p.crop_url)}
+                                  alt={p.name}
+                                  className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                  <User className="h-10 w-10 opacity-60" />
+                                </div>
+                              )}
+                              
+                              {/* Overlay Seek Quick Button on Image Hover */}
+                              <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center gap-2 backdrop-blur-[2px]">
+                                <span className="flex items-center gap-1 text-[11px] font-bold text-white bg-primary px-3 py-1.5 rounded-lg shadow-md">
+                                  <Play className="h-3 w-3 fill-white" /> Jump to {formatSecondsToTime(firstSeen)}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Details */}
+                            <div className="space-y-1">
+                              <span className="font-bold text-xs text-foreground block truncate" title={p.name}>
+                                {p.name}
+                              </span>
+
+                              {/* Timecode & Dwell Time */}
+                              <div className="flex items-center justify-between text-[11px] font-mono text-muted-foreground">
+                                <span className="flex items-center gap-1 text-primary font-semibold">
+                                  <Clock className="h-3 w-3 shrink-0" />
+                                  {p.formatted_time || `${formatSecondsToTime(firstSeen)} - ${formatSecondsToTime(lastSeen)}`}
+                                </span>
+                                <span className="bg-background/60 px-1.5 py-0.5 rounded text-[10px] text-foreground font-medium">
+                                  {dwellSec}s {appearances > 1 ? 'total' : 'dwell'}
+                                </span>
+                              </div>
+
+                              {/* Multi-appearance Segment Seek Chips */}
+                              {p.segments && p.segments.length > 1 && (
+                                <div className="pt-1 flex flex-wrap items-center gap-1">
+                                  <span className="text-[9px] text-muted-foreground font-semibold uppercase">Moments:</span>
+                                  {p.segments.map((seg, sIdx) => (
+                                    <button
+                                      key={sIdx}
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSeekVideoToTime(seg.first_seen_sec);
+                                      }}
+                                      className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-accent/60 hover:bg-primary hover:text-primary-foreground border border-border/80 transition-colors cursor-pointer"
+                                      title={`Seek to ${formatSecondsToTime(seg.first_seen_sec)} (${seg.duration_seconds}s)`}
+                                    >
+                                      ▶ {formatSecondsToTime(seg.first_seen_sec)}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Zone / Location */}
+                              {(p.zone_name || p.camera_name) && (
+                                <div className="text-[10px] text-muted-foreground truncate flex items-center gap-1">
+                                  <MapPin className="h-2.5 w-2.5 text-primary shrink-0" />
+                                  <span className="truncate">{p.zone_name || p.camera_name}</span>
+                                </div>
+                              )}
+                            </div>
+
+                            {/* Action Buttons */}
+                            <div className="pt-2 border-t border-border/50 flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleSeekVideoToTime(firstSeen);
+                                }}
+                                className="flex-1 flex items-center justify-center gap-1.5 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground py-1.5 text-[11px] font-bold transition-all cursor-pointer border border-primary/20"
+                              >
+                                <Play className="h-3 w-3 fill-current" /> Seek
+                              </button>
+
+                              {personId && (
+                                <Link
+                                  href={`/people/${personId}?type=${p.person_type}`}
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="flex items-center justify-center gap-1 rounded-lg border border-border bg-card hover:bg-accent px-2.5 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+                                  title="View complete journey timeline"
+                                >
+                                  <Footprints className="h-3 w-3 text-primary" /> Journey
+                                </Link>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    /* LIST / ROW VIEW */
+                    <div className="overflow-x-auto rounded-xl border border-border bg-card/40">
+                      <table className="w-full text-left text-xs border-collapse">
+                        <thead>
+                          <tr className="border-b border-border bg-accent/30 text-muted-foreground text-[11px] uppercase tracking-wider font-semibold">
+                            <th className="py-2.5 px-3 w-12 text-center">#</th>
+                            <th className="py-2.5 px-3 w-14">Photo</th>
+                            <th className="py-2.5 px-3">Identity & Role</th>
+                            <th className="py-2.5 px-3">Time Range & Moments</th>
+                            <th className="py-2.5 px-3">Dwell Time</th>
+                            <th className="py-2.5 px-3">Zone / Camera</th>
+                            <th className="py-2.5 px-3 text-center">Status</th>
+                            <th className="py-2.5 px-3 text-right">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-border/60">
+                          {detectedPeople.map((p, idx) => {
+                            const firstSeen = p.first_seen_sec ?? p.first_seen ?? 0;
+                            const lastSeen = p.last_seen_sec ?? p.last_seen ?? (firstSeen + 1);
+                            const isAnnotatedTrimmed = Boolean(sessionData?.output_video_path && (sessionData?.start_time_sec ?? 0) > 0);
+                            const effectiveVideoTime = isAnnotatedTrimmed
+                              ? playbackCurrentTime + (sessionData?.start_time_sec || 0)
+                              : playbackCurrentTime;
+                            
+                            const isInFrame = p.segments && p.segments.length > 0
+                              ? p.segments.some(
+                                  (seg) => effectiveVideoTime >= (seg.first_seen_sec - 0.25) && effectiveVideoTime <= (seg.last_seen_sec + 0.25)
+                                )
+                              : effectiveVideoTime >= (firstSeen - 0.25) && effectiveVideoTime <= (lastSeen + 0.25);
+
+                            const dwellSec = p.duration_seconds ?? Math.max(1, Math.round(lastSeen - firstSeen));
+                            const seqNum = p.sequence_number ?? (idx + 1);
+                            const personId = p.identity_id || p.employee_id;
+                            const appearances = p.appearances_count ?? (p.segments?.length || 1);
+
+                            return (
+                              <tr
+                                key={idx}
+                                onClick={() => handleSeekVideoToTime(firstSeen)}
+                                className={`transition-all cursor-pointer group select-none ${
+                                  isInFrame
+                                    ? 'bg-emerald-500/15 ring-1 ring-inset ring-emerald-500/50'
+                                    : 'hover:bg-accent/40'
+                                }`}
+                              >
+                                {/* Sequence # */}
+                                <td className="py-2.5 px-3 text-center font-mono font-bold text-muted-foreground group-hover:text-foreground">
+                                  #{seqNum}
+                                </td>
+
+                                {/* Photo Thumbnail */}
+                                <td className="py-2 px-3">
+                                  <div className="relative h-10 w-10 overflow-hidden rounded-lg bg-background border border-border shrink-0">
+                                    {p.crop_url ? (
+                                      <img
+                                        src={getMediaCropUrl(p.crop_url)}
+                                        alt={p.name}
+                                        className="h-full w-full object-cover"
+                                      />
+                                    ) : (
+                                      <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                        <User className="h-5 w-5 opacity-60" />
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* Name & Role */}
+                                <td className="py-2.5 px-3">
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-bold text-foreground block truncate max-w-[160px]" title={p.name}>
+                                      {p.name}
+                                    </span>
+                                    <span
+                                      className={`text-[9px] font-bold px-2 py-0.5 rounded-full uppercase ${
+                                        p.person_type === 'employee'
+                                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                      }`}
+                                    >
+                                      {p.person_type === 'employee' ? '👔 Employee' : '👤 Visitor'}
+                                    </span>
+                                    {appearances > 1 && (
+                                      <span className="text-[9px] font-bold px-1.5 py-0.5 rounded-md bg-primary/20 text-primary border border-primary/30">
+                                        🔁 {appearances}x
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* Time Range & Moments */}
+                                <td className="py-2.5 px-3">
+                                  <div className="space-y-1">
+                                    <span className="font-mono text-[11px] text-primary font-semibold flex items-center gap-1">
+                                      <Clock className="h-3 w-3 shrink-0" />
+                                      {p.formatted_time || `${formatSecondsToTime(firstSeen)} - ${formatSecondsToTime(lastSeen)}`}
+                                    </span>
+                                    {p.segments && p.segments.length > 1 && (
+                                      <div className="flex flex-wrap items-center gap-1">
+                                        {p.segments.map((seg, sIdx) => (
+                                          <button
+                                            key={sIdx}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleSeekVideoToTime(seg.first_seen_sec);
+                                            }}
+                                            className="px-1.5 py-0.5 rounded text-[9px] font-mono font-medium bg-accent/70 hover:bg-primary hover:text-primary-foreground border border-border/80 transition-colors cursor-pointer"
+                                            title={`Seek to ${formatSecondsToTime(seg.first_seen_sec)} (${seg.duration_seconds}s)`}
+                                          >
+                                            ▶ {formatSecondsToTime(seg.first_seen_sec)}
+                                          </button>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </td>
+
+                                {/* Dwell Duration */}
+                                <td className="py-2.5 px-3">
+                                  <span className="font-mono text-xs font-semibold bg-accent/60 px-2 py-0.5 rounded text-foreground border border-border/60">
+                                    {dwellSec}s {appearances > 1 ? 'total' : ''}
+                                  </span>
+                                </td>
+
+                                {/* Zone */}
+                                <td className="py-2.5 px-3 text-muted-foreground text-xs">
+                                  {(p.zone_name || p.camera_name) ? (
+                                    <div className="flex items-center gap-1">
+                                      <MapPin className="h-3 w-3 text-primary shrink-0" />
+                                      <span className="truncate max-w-[120px]">{p.zone_name || p.camera_name}</span>
+                                    </div>
+                                  ) : (
+                                    '—'
+                                  )}
+                                </td>
+
+                                {/* In-Frame Indicator */}
+                                <td className="py-2.5 px-3 text-center">
+                                  {isInFrame ? (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-white animate-pulse shadow-sm">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" /> IN FRAME
+                                    </span>
+                                  ) : (
+                                    <span className="text-[10px] text-muted-foreground/60 font-mono">—</span>
+                                  )}
+                                </td>
+
+                                {/* Actions */}
+                                <td className="py-2.5 px-3 text-right">
+                                  <div className="flex items-center justify-end gap-1.5">
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleSeekVideoToTime(firstSeen);
+                                      }}
+                                      className="flex items-center gap-1 rounded-md bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground px-2 py-1 text-[11px] font-bold transition-all cursor-pointer border border-primary/20"
+                                    >
+                                      <Play className="h-3 w-3 fill-current" /> Seek
+                                    </button>
+                                    {personId && (
+                                      <Link
+                                        href={`/people/${personId}?type=${p.person_type}`}
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="flex items-center gap-1 rounded-md border border-border bg-card hover:bg-accent px-2 py-1 text-[11px] font-semibold text-muted-foreground hover:text-foreground transition-all cursor-pointer"
+                                        title="View complete journey"
+                                      >
+                                        <Footprints className="h-3 w-3 text-primary" /> Journey
+                                      </Link>
+                                    )}
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )
                 ) : (
                   <div className="text-center text-xs text-muted-foreground p-8">
                     No individual crops available for this session.
@@ -1758,6 +2504,12 @@ function VigilensAPAMainContent() {
       {/* ========================================================= */}
       {mainTab === 'people' && !selectedPersonForJourney && (
         <div className="space-y-6">
+          {/* Human-in-the-Loop Review Queue */}
+          <ReviewQueueBanner
+            targetDate={directoryDate}
+            onReconciled={fetchPeopleDirectory}
+          />
+
           <div className="rounded-2xl border border-border bg-card p-6 shadow-sm space-y-4">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/60 pb-4">
               <div>
@@ -1769,7 +2521,21 @@ function VigilensAPAMainContent() {
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
+                <button
+                  type="button"
+                  onClick={() => setIsSearchByPhotoOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 px-3.5 py-2 text-xs font-bold text-white hover:from-indigo-500 hover:to-purple-500 transition-all shadow-md shadow-indigo-500/20 cursor-pointer"
+                >
+                  <Camera className="h-4 w-4" /> Search by Photo
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsDailyCheckinOpen(true)}
+                  className="flex items-center gap-1.5 rounded-xl bg-cyan-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-cyan-500 transition-all shadow-md shadow-cyan-600/20 cursor-pointer"
+                >
+                  <UserCheck className="h-4 w-4" /> Daily Check-In
+                </button>
                 <button
                   type="button"
                   onClick={() => setIsEnrollingPerson(true)}
@@ -2049,6 +2815,14 @@ function VigilensAPAMainContent() {
                 </div>
               )}
             </div>
+
+            {/* Hourly Area Dwell Distribution for this person */}
+            <div className="mt-8">
+              <HourlyDwellChart
+                personId={selectedPersonForJourney.person_id}
+                personName={selectedPersonForJourney.name}
+              />
+            </div>
           </div>
         </div>
       )}
@@ -2123,6 +2897,16 @@ function VigilensAPAMainContent() {
                       >
                         {s.status}
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => handleRerunPastSession(s)}
+                        disabled={rerunningSessionId === s.id || (s.status || '').toUpperCase() === 'PROCESSING'}
+                        className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
+                        title="Rerun video analytics with same parameters"
+                      >
+                        <Play className={`h-3.5 w-3.5 ${rerunningSessionId === s.id ? 'animate-spin' : 'fill-primary'}`} />
+                        {rerunningSessionId === s.id ? 'Rerunning...' : 'Rerun'}
+                      </button>
                       <button
                         type="button"
                         onClick={() => handleSelectPastSession(s)}
@@ -2440,6 +3224,20 @@ function VigilensAPAMainContent() {
           </div>
         </div>
       )}
+
+      {/* Daily Appearance & Face Check-In Modal */}
+      <DailyCheckinModal
+        isOpen={isDailyCheckinOpen}
+        onClose={() => setIsDailyCheckinOpen(false)}
+        onSuccess={() => fetchPeopleDirectory()}
+      />
+
+      {/* Search by Photo / Reference Image Vector DB Modal */}
+      <SearchByPhotoModal
+        isOpen={isSearchByPhotoOpen}
+        onClose={() => setIsSearchByPhotoOpen(false)}
+        onSeekToMoment={handlePhotoSearchSeek}
+      />
     </div>
   );
 }

@@ -6,21 +6,23 @@ import {
   Sparkles,
   Send,
   Trash2,
-  RefreshCw,
-  MessageSquare,
-  Bot,
-  User,
+  Cpu,
+  Database,
+  CheckCircle2,
+  AlertCircle,
 } from 'lucide-react';
-import { queryAssistant } from '@/lib/api/assistant';
+import { queryAssistant, getOllamaModels } from '@/lib/api/assistant';
 import { ChatMessage } from '@/components/assistant/ChatMessage';
 import { SuggestedQueries } from '@/components/assistant/SuggestedQueries';
-import type { ChatMessage as ChatMessageType } from '@/types/assistant';
+import type { ChatMessage as ChatMessageType, OllamaModelInfo } from '@/types/assistant';
 
 export default function AssistantPage() {
   const router = useRouter();
   const [messages, setMessages] = useState<ChatMessageType[]>([]);
   const [inputQuery, setInputQuery] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const [ollamaInfo, setOllamaInfo] = useState<OllamaModelInfo | null>(null);
+  const [selectedModel, setSelectedModel] = useState<string>('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   const scrollToBottom = () => {
@@ -30,6 +32,17 @@ export default function AssistantPage() {
   useEffect(() => {
     scrollToBottom();
   }, [messages, isLoading]);
+
+  useEffect(() => {
+    getOllamaModels().then((info) => {
+      if (info) {
+        setOllamaInfo(info);
+        if (info.current_model) {
+          setSelectedModel(info.current_model);
+        }
+      }
+    });
+  }, []);
 
   const handleSendQuery = async (queryText?: string) => {
     const text = (queryText || inputQuery).trim();
@@ -47,9 +60,16 @@ export default function AssistantPage() {
     setIsLoading(true);
 
     try {
+      const history = messages.map((m) => ({
+        role: m.sender === 'user' ? 'user' : 'assistant',
+        content: m.content,
+      }));
+
       const response = await queryAssistant({
         question: text,
         session_id: 'apa_session',
+        model_name: selectedModel || undefined,
+        conversation_history: history,
       });
 
       const assistantMsg: ChatMessageType = {
@@ -59,6 +79,11 @@ export default function AssistantPage() {
         timestamp: new Date().toISOString(),
         metadata: {
           entities: response.entities,
+          sql_query: response.sql_query,
+          execution_time_ms: response.execution_time_ms,
+          model_used: response.model_used,
+          retry_count: response.retry_count,
+          suggested_followups: response.suggested_followups,
         },
       };
 
@@ -68,7 +93,7 @@ export default function AssistantPage() {
         id: `assistant-error-${Date.now()}`,
         sender: 'assistant',
         content:
-          'I encountered an error processing your query. Please ensure video footage has been processed for this workspace.',
+          '⚠️ **Error Processing Query**\n\nCould not execute surveillance query against the PostgreSQL database. Please verify video analytics processing has completed.',
         timestamp: new Date().toISOString(),
       };
       setMessages((prev) => [...prev, errorMsg]);
@@ -95,23 +120,62 @@ export default function AssistantPage() {
       <div className="flex items-center justify-between border-b border-border/80 bg-accent/20 px-6 py-3.5">
         <div className="flex items-center gap-3">
           <div className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary border border-primary/20">
-            <Sparkles className="h-4 w-4" />
+            <Database className="h-4 w-4" />
           </div>
           <div>
-            <h3 className="text-xs font-bold text-foreground">Vigilens AI Assistant</h3>
-            <p className="text-[10px] text-muted-foreground">LangChain RAG Spatio-Temporal Intelligence</p>
+            <h3 className="text-xs font-bold text-foreground">Vigilens Autonomous SQL Agent</h3>
+            <p className="text-[10px] text-muted-foreground">PostgreSQL Surveillance & Spatio-Temporal Intelligence</p>
           </div>
         </div>
 
-        {messages.length > 0 && (
-          <button
-            type="button"
-            onClick={handleClearChat}
-            className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-destructive hover:border-destructive/30 transition-colors"
-          >
-            <Trash2 className="h-3.5 w-3.5" /> Clear Chat
-          </button>
-        )}
+        {/* Engine Status & Controls */}
+        <div className="flex items-center gap-3">
+          {ollamaInfo ? (
+            <div className="flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-[10px]">
+              {ollamaInfo.status === 'connected' ? (
+                <>
+                  <CheckCircle2 className="h-3 w-3 text-emerald-500" />
+                  <span className="font-medium text-foreground">{ollamaInfo.provider || 'Engine'}:</span>
+                  {ollamaInfo.available_models.length > 1 ? (
+                    <select
+                      value={selectedModel}
+                      onChange={(e) => setSelectedModel(e.target.value)}
+                      className="bg-transparent font-medium text-primary focus:outline-none cursor-pointer"
+                    >
+                      {ollamaInfo.available_models.map((m) => (
+                        <option key={m} value={m} className="bg-card text-foreground">
+                          {m}
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <span className="font-mono text-primary">{selectedModel || ollamaInfo.current_model}</span>
+                  )}
+                </>
+              ) : (
+                <>
+                  <AlertCircle className="h-3 w-3 text-amber-500" />
+                  <span className="text-muted-foreground">{ollamaInfo.provider || 'Offline'} (Rule Fallback)</span>
+                </>
+              )}
+            </div>
+          ) : (
+            <div className="flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-[10px] text-muted-foreground">
+              <Cpu className="h-3 w-3 text-primary" />
+              <span>SQL Agent Engine</span>
+            </div>
+          )}
+
+          {messages.length > 0 && (
+            <button
+              type="button"
+              onClick={handleClearChat}
+              className="flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-[11px] font-semibold text-muted-foreground hover:text-destructive hover:border-destructive/30 transition-colors"
+            >
+              <Trash2 className="h-3.5 w-3.5" /> Clear Chat
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Messages Thread Container */}
@@ -125,6 +189,7 @@ export default function AssistantPage() {
                 key={msg.id}
                 message={msg}
                 onSelectEntity={handleEntityClick}
+                onSelectFollowup={(followup) => handleSendQuery(followup)}
               />
             ))}
             {isLoading && (
@@ -138,7 +203,7 @@ export default function AssistantPage() {
                     <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.2s]" />
                     <span className="h-1.5 w-1.5 rounded-full bg-primary animate-bounce [animation-delay:0.4s]" />
                   </div>
-                  <span>Analyzing spatial graph & ReID embeddings...</span>
+                  <span>Generating PostgreSQL query & analyzing spatial intelligence...</span>
                 </div>
               </div>
             )}
@@ -158,7 +223,7 @@ export default function AssistantPage() {
         >
           <input
             type="text"
-            placeholder="Ask anything about people, cameras, dwell times, or spatial routes..."
+            placeholder="Ask anything (e.g. 'Who stayed the longest?', 'Which camera has most foot traffic?')..."
             value={inputQuery}
             onChange={(e) => setInputQuery(e.target.value)}
             disabled={isLoading}

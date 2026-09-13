@@ -15,11 +15,13 @@ import {
   UserPlus,
   TrendingUp,
   AlertTriangle,
+  Play,
 } from 'lucide-react';
 import {
   listAnalyticsSessions,
   deleteAdvancedSession,
   resetAnalyticsData,
+  rerunAdvancedSession,
 } from '@/lib/api/advancedpeopleanalytics';
 import type { AdvancedAnalyticsSession } from '@/types/advancedpeopleanalytics';
 
@@ -28,6 +30,7 @@ export default function HistoryPage() {
   const [sessions, setSessions] = useState<AdvancedAnalyticsSession[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [rerunningId, setRerunningId] = useState<string | null>(null);
   const [sessionToDelete, setSessionToDelete] = useState<AdvancedAnalyticsSession | null>(null);
   const [isResetConfirmOpen, setIsResetConfirmOpen] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
@@ -49,6 +52,23 @@ export default function HistoryPage() {
   useEffect(() => {
     fetchSessions();
   }, []);
+
+  const handleRerun = async (session: AdvancedAnalyticsSession) => {
+    setRerunningId(session.id);
+    try {
+      const res = await rerunAdvancedSession(session.id);
+      if (res?.data) {
+        toast.success(`Rerunning analysis for "${session.video_name}"...`);
+        router.push(`/?sessionId=${session.id}`);
+      } else {
+        toast.error(res?.message || 'Failed to rerun analysis');
+      }
+    } catch {
+      toast.error('Failed to rerun analysis');
+    } finally {
+      setRerunningId(null);
+    }
+  };
 
   const handleDelete = async () => {
     if (!sessionToDelete) return;
@@ -149,6 +169,16 @@ export default function HistoryPage() {
                   >
                     {s.status}
                   </span>
+                  <button
+                    type="button"
+                    onClick={() => handleRerun(s)}
+                    disabled={rerunningId === s.id || (s.status || '').toUpperCase() === 'PROCESSING'}
+                    className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
+                    title="Rerun video analytics with same parameters"
+                  >
+                    <Play className={`h-3.5 w-3.5 ${rerunningId === s.id ? 'animate-spin' : 'fill-primary'}`} />
+                    {rerunningId === s.id ? 'Rerunning...' : 'Rerun'}
+                  </button>
                   <button
                     type="button"
                     onClick={() => router.push(`/?sessionId=${s.id}`)}

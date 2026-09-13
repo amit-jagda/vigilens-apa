@@ -1,17 +1,19 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import ReactMarkdown from 'react-markdown';
-import { User, Sparkles, Footprints, Camera } from 'lucide-react';
+import { User, Sparkles, Footprints, Camera, Code2, ChevronDown, ChevronUp, Clock, Cpu, MapPin } from 'lucide-react';
 import type { ChatMessage as ChatMessageType } from '@/types/assistant';
 
 interface ChatMessageProps {
   message: ChatMessageType;
   onSelectEntity?: (type: 'person' | 'camera' | 'zone' | 'date', idOrLabel: string) => void;
+  onSelectFollowup?: (query: string) => void;
 }
 
-export function ChatMessage({ message, onSelectEntity }: ChatMessageProps) {
+export function ChatMessage({ message, onSelectEntity, onSelectFollowup }: ChatMessageProps) {
   const isAssistant = message.sender === 'assistant';
+  const [showSql, setShowSql] = useState(false);
 
   return (
     <div
@@ -38,9 +40,48 @@ export function ChatMessage({ message, onSelectEntity }: ChatMessageProps) {
             : 'bg-primary text-primary-foreground'
         }`}
       >
-        <div className="prose prose-invert prose-xs max-w-none">
+        {/* Model & Latency Header Badge (for Assistant) */}
+        {isAssistant && message.metadata?.model_used && (
+          <div className="mb-2 flex items-center justify-between gap-2 border-b border-border/60 pb-2 text-[10px] text-muted-foreground">
+            <div className="flex items-center gap-1.5 font-medium">
+              <Cpu className="h-3 w-3 text-primary" />
+              <span>{message.metadata.model_used}</span>
+            </div>
+            {message.metadata?.execution_time_ms !== undefined && (
+              <div className="flex items-center gap-1 font-mono text-[9px] text-muted-foreground">
+                <Clock className="h-2.5 w-2.5" />
+                <span>{message.metadata.execution_time_ms} ms</span>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div className="prose prose-invert prose-xs max-w-none text-foreground/90 leading-relaxed">
           <ReactMarkdown>{message.content}</ReactMarkdown>
         </div>
+
+        {/* Expandable Generated SQL Query */}
+        {isAssistant && message.metadata?.sql_query && (
+          <div className="mt-3 rounded-lg border border-border/80 bg-accent/30 overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setShowSql(!showSql)}
+              className="flex w-full items-center justify-between px-3 py-1.5 text-[11px] font-medium text-muted-foreground hover:text-foreground transition-colors"
+            >
+              <span className="flex items-center gap-1.5 text-primary">
+                <Code2 className="h-3.5 w-3.5" />
+                <span>Generated PostgreSQL Query</span>
+              </span>
+              {showSql ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+            </button>
+
+            {showSql && (
+              <div className="border-t border-border/60 bg-zinc-950 p-3 font-mono text-[11px] text-emerald-400 overflow-x-auto whitespace-pre leading-normal">
+                {message.metadata.sql_query}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Clickable Entity Chips in Assistant Responses */}
         {isAssistant && message.metadata?.entities && message.metadata.entities.length > 0 && (
@@ -55,10 +96,28 @@ export function ChatMessage({ message, onSelectEntity }: ChatMessageProps) {
               >
                 {ent.type === 'person' ? (
                   <Footprints className="h-3 w-3 text-primary" />
-                ) : (
+                ) : ent.type === 'camera' ? (
                   <Camera className="h-3 w-3 text-primary" />
+                ) : (
+                  <MapPin className="h-3 w-3 text-primary" />
                 )}
                 <span>{ent.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Suggested Followup Questions */}
+        {isAssistant && message.metadata?.suggested_followups && message.metadata.suggested_followups.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5 pt-2">
+            {message.metadata.suggested_followups.map((followup, idx) => (
+              <button
+                key={idx}
+                type="button"
+                onClick={() => onSelectFollowup?.(followup)}
+                className="rounded-full border border-primary/20 bg-primary/5 px-2.5 py-1 text-[10px] font-medium text-primary hover:bg-primary/10 transition-colors"
+              >
+                💬 {followup}
               </button>
             ))}
           </div>

@@ -269,19 +269,22 @@ export async function processGroupPhotoAttendance(payload: {
 // ── Media URLs ──
 
 /** Returns the streaming URL for an annotated attendance video */
-export function getAttendanceVideoUrl(outputVideoPath: string): string {
+export function getAttendanceVideoUrl(outputVideoPath?: string | null): string {
+  if (!outputVideoPath) return '';
   const normalized = outputVideoPath.replace(/\\/g, '/');
   return `${BACKEND_URL}/${normalized}`;
 }
 
 /** Returns the display URL for an employee profile photo */
-export function getEmployeePhotoUrl(photoPath: string): string {
+export function getEmployeePhotoUrl(photoPath?: string | null): string {
+  if (!photoPath) return '';
   const normalized = photoPath.replace(/\\/g, '/');
   return `${BACKEND_URL}/${normalized}`;
 }
 
 /** Returns the display URL for an annotated group photo */
-export function getAnnotatedGroupPhotoUrl(imagePath: string): string {
+export function getAnnotatedGroupPhotoUrl(imagePath?: string | null): string {
+  if (!imagePath) return '';
   const normalized = imagePath.replace(/\\/g, '/');
   return `${BACKEND_URL}/${normalized}`;
 }

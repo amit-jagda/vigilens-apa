@@ -1,5 +1,5 @@
 import { apiClient } from '../apiClient';
-import type { AssistantQueryPayload, AssistantQueryResponse } from '@/types/assistant';
+import type { AssistantQueryPayload, AssistantQueryResponse, OllamaModelInfo } from '@/types/assistant';
 import type { ApiResponse } from '@/types/gallery';
 import { listPeopleDirectory } from './advancedpeopleanalytics';
 
@@ -10,10 +10,10 @@ export async function queryAssistant(payload: AssistantQueryPayload): Promise<As
       return response.data.data;
     }
   } catch (error) {
-    // Graceful fallback response synthesizer if backend RAG endpoint is being configured
+    console.warn('Backend SQL Agent call error, using local fallback:', error);
   }
 
-  // Smart local semantic responder over live tenant intelligence
+  // Smart local semantic fallback synthesizer if backend is starting up
   const q = payload.question.toLowerCase().trim();
   const peopleRes = await listPeopleDirectory().catch(() => null);
   const people = peopleRes?.data || [];
@@ -32,11 +32,17 @@ export async function queryAssistant(payload: AssistantQueryPayload): Promise<As
         )
         .join('\n')}`,
       session_id: payload.session_id || 'session_default',
+      model_used: 'Local Surveillance Engine',
       entities: people.slice(0, 3).map((p) => ({
         type: 'person',
         id: p.person_id,
         label: p.name,
       })),
+      suggested_followups: [
+        'Who stayed the longest on premises?',
+        'Which camera had the highest foot traffic?',
+        'Show me all staff members detected today',
+      ],
     };
   }
 
@@ -49,7 +55,12 @@ export async function queryAssistant(payload: AssistantQueryPayload): Promise<As
           top.total_dwell_seconds,
         )}s** across ${top.camera_stops_count} camera zones (${top.cameras_visited.join(' ➔ ')}).`,
         session_id: payload.session_id || 'session_default',
+        model_used: 'Local Surveillance Engine',
         entities: [{ type: 'person', id: top.person_id, label: top.name }],
+        suggested_followups: [
+          'Which camera had the highest foot traffic?',
+          'Who visited yesterday?',
+        ],
       };
     }
   }
@@ -67,12 +78,27 @@ export async function queryAssistant(payload: AssistantQueryPayload): Promise<As
     return {
       answer: `Based on spatio-temporal foot traffic analysis:\n\n- 📷 **${topCam ? topCam[0] : 'Cafeteria'}** is the highest traffic zone with **${topCam ? topCam[1] : people.length} distinct visitors**.\n- All camera nodes are actively synced across the spatial topology graph.`,
       session_id: payload.session_id || 'session_default',
+      model_used: 'Local Surveillance Engine',
       entities: topCam ? [{ type: 'camera', label: topCam[0] }] : [],
+      suggested_followups: [
+        'Who stayed the longest on premises?',
+        'Show all staff members detected today',
+      ],
     };
   }
 
   return {
     answer: `I have analyzed the spatial and visitor intelligence for this workspace. You have **${people.length} detected individuals** and active camera routes recorded. You can ask me about specific visitors, foot traffic hotspots, or dwell durations.`,
     session_id: payload.session_id || 'session_default',
+    model_used: 'Local Surveillance Engine',
   };
+}
+
+export async function getOllamaModels(): Promise<OllamaModelInfo | null> {
+  try {
+    const response = await apiClient.get<ApiResponse<OllamaModelInfo>>('/assistant/models');
+    return response.data?.data || null;
+  } catch (error) {
+    return null;
+  }
 }

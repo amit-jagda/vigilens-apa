@@ -12,15 +12,33 @@ import {
   Timer,
   Camera,
   Filter,
+  BarChart3,
+  UserCheck,
 } from 'lucide-react';
-import { listPeopleDirectory } from '@/lib/api/advancedpeopleanalytics';
+import { listPeopleDirectory, deleteVisitorIdentity } from '@/lib/api/advancedpeopleanalytics';
+import toast from 'react-hot-toast';
 import { PersonCard } from '@/components/people/PersonCard';
+import { DailyCheckinModal } from '@/components/people/DailyCheckinModal';
+import { ReviewQueueBanner } from '@/components/people/ReviewQueueBanner';
+import { HourlyDwellChart } from '@/components/people/HourlyDwellChart';
 import type { PersonSummaryItem } from '@/types/advancedpeopleanalytics';
 
 export default function PeopleDirectoryPage() {
   const router = useRouter();
   const [people, setPeople] = useState<PersonSummaryItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isDailyCheckinOpen, setIsDailyCheckinOpen] = useState(false);
+  const [showHourlyAnalytics, setShowHourlyAnalytics] = useState(false);
+
+  const handleDeleteVisitor = async (person: PersonSummaryItem) => {
+    try {
+      const res = await deleteVisitorIdentity(person.person_id);
+      toast.success(res?.message || 'Visitor profile deleted successfully');
+      setPeople((prev) => prev.filter((p) => p.person_id !== person.person_id));
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to delete visitor profile');
+    }
+  };
 
   // Filters
   const [roleFilter, setRoleFilter] = useState<'all' | 'employee' | 'visitor'>('all');
@@ -68,7 +86,7 @@ export default function PeopleDirectoryPage() {
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5 flex-wrap">
           <div className="rounded-xl border border-border bg-accent/30 px-3 py-2 text-xs">
             <span className="text-[10px] text-muted-foreground block font-semibold">Total People</span>
             <span className="text-sm font-bold text-foreground">{people.length}</span>
@@ -85,8 +103,39 @@ export default function PeopleDirectoryPage() {
               {people.filter((p) => p.person_type === 'visitor').length}
             </span>
           </div>
+
+          {/* Action Buttons */}
+          <button
+            type="button"
+            onClick={() => setShowHourlyAnalytics(!showHourlyAnalytics)}
+            className={`flex items-center gap-1.5 rounded-xl border px-3 py-2 text-xs font-semibold transition-all cursor-pointer ${
+              showHourlyAnalytics
+                ? 'bg-indigo-500/10 text-indigo-400 border-indigo-500/30'
+                : 'border-border bg-accent/20 text-muted-foreground hover:text-foreground'
+            }`}
+          >
+            <BarChart3 className="h-4 w-4" /> Hourly Dwell
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setIsDailyCheckinOpen(true)}
+            className="flex items-center gap-1.5 rounded-xl bg-cyan-600 px-3.5 py-2 text-xs font-bold text-white hover:bg-cyan-500 shadow-md shadow-cyan-600/20 transition-all cursor-pointer"
+          >
+            <UserCheck className="h-4 w-4" /> Daily Check-In
+          </button>
         </div>
       </div>
+
+      {/* Human-in-the-Loop Review Queue */}
+      <ReviewQueueBanner targetDate={dateFilter} onReconciled={fetchPeople} />
+
+      {/* Area Hourly Dwell Distribution Chart (collapsible) */}
+      {showHourlyAnalytics && (
+        <div className="animate-in fade-in duration-200">
+          <HourlyDwellChart initialDate={dateFilter} />
+        </div>
+      )}
 
       {/* Filter & Search Bar */}
       <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
@@ -165,6 +214,7 @@ export default function PeopleDirectoryPage() {
               onViewJourney={(p) =>
                 router.push(`/people/${p.person_id}?type=${p.person_type}`)
               }
+              onDelete={handleDeleteVisitor}
             />
           ))}
         </div>
@@ -177,6 +227,13 @@ export default function PeopleDirectoryPage() {
           </p>
         </div>
       )}
+
+      {/* Daily Appearance & Face Check-In Modal */}
+      <DailyCheckinModal
+        isOpen={isDailyCheckinOpen}
+        onClose={() => setIsDailyCheckinOpen(false)}
+        onSuccess={() => fetchPeople()}
+      />
     </div>
   );
 }

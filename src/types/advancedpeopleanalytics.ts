@@ -49,6 +49,9 @@ export interface AdvancedAnalyticsSession {
   video_name: string;
   video_path?: string;
   output_video_path?: string;
+  generate_video?: boolean;
+  start_time_sec?: number | null;
+  end_time_sec?: number | null;
   file_size?: number;
   status: string;
   progress?: number;
@@ -74,6 +77,13 @@ export interface AdvancedAnalyticsSession {
   created_at: string;
 }
 
+export interface PersonAppearanceSegment {
+  first_seen_sec: number;
+  last_seen_sec: number;
+  duration_seconds: number;
+  formatted_time: string;
+}
+
 export interface SessionDetectedPerson {
   identity_id?: string;
   employee_id?: string;
@@ -83,16 +93,25 @@ export interface SessionDetectedPerson {
   crop_url?: string;
   first_seen: number;
   last_seen: number;
+  first_seen_sec?: number;
+  last_seen_sec?: number;
+  duration_seconds?: number;
+  formatted_time?: string;
+  zone_name?: string;
+  sequence_number?: number;
   started_at: string;
   ended_at: string;
   confidence: number;
   identity_source: string;
   camera_name?: string;
+  appearances_count?: number;
+  segments?: PersonAppearanceSegment[];
 }
 
 export interface PersonSummaryItem {
   person_type: 'employee' | 'visitor';
   person_id: string;
+  identity_id?: string;
   name: string;
   employee_code?: string;
   crop_url?: string;
@@ -127,8 +146,94 @@ export interface PersonTimelineResponse {
 
 export interface RegisterVisitorPayload {
   identity_id: string;
-  first_name: string;
-  last_name: string;
-  registration_type: 'visitor' | 'employee';
+  first_name?: string;
+  last_name?: string;
+  registration_type: 'visitor' | 'employee' | 'new_employee' | 'link_existing_employee';
   employee_code?: string;
+  existing_employee_id?: string;
+  retroactive_attendance?: boolean;
+  force?: boolean;
+}
+
+export interface DailyCheckinResponse {
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string;
+  checkin_date: string;
+  face_registered: boolean;
+  appearance_anchored: boolean;
+  message: string;
+}
+
+export interface HourlyAreaDwellItem {
+  hour: string;
+  hour_int: number;
+  total_dwell_seconds: number;
+  portion_of_hour: number;
+  formatted_duration: string;
+  areas: Record<string, number>;
+}
+
+export interface HourlyDwellResponse {
+  target_date: string;
+  person_id?: string;
+  person_name?: string;
+  all_areas: string[];
+  hourly_data: HourlyAreaDwellItem[];
+}
+
+export interface ReviewQueueCandidate {
+  identity_id: string;
+  crop_url?: string;
+  first_seen_at?: string;
+  last_seen_at?: string;
+  total_dwell_seconds: number;
+  camera_stops_count: number;
+  cameras_visited: string[];
+  suggested_employee_id?: string;
+  suggested_employee_name?: string;
+  suggested_similarity?: number;
+}
+
+export interface ReconcileIdentityPayload {
+  target_employee_id?: string;
+  or_visitor_name?: string;
+  auto_merge_similar?: boolean;
+  similarity_threshold?: number;
+}
+
+export interface PhotoSearchAppearanceItem {
+  session_id?: string;
+  camera_id?: string;
+  camera_name: string;
+  zone_name?: string | null;
+  timestamp: string;
+  timestamp_offset_seconds?: number;
+  dwell_seconds?: number;
+  crop_url?: string | null;
+  thumbnail_url?: string | null;
+  event_type?: string;
+}
+
+export interface PhotoSearchMatchItem {
+  identity_type: 'employee' | 'visitor';
+  identity_id: string;
+  name: string;
+  code?: string | null;
+  similarity_score: number;
+  similarity_percentage: string;
+  matched_via: string;
+  primary_photo_url?: string | null;
+  total_appearances: number;
+  first_seen_at?: string | null;
+  last_seen_at?: string | null;
+  timeline_events: PhotoSearchAppearanceItem[];
+}
+
+export interface PhotoSearchResponse {
+  query_processed: boolean;
+  face_detected_in_query: boolean;
+  appearance_extracted: boolean;
+  total_matches_found: number;
+  matches: PhotoSearchMatchItem[];
 }

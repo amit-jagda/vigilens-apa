@@ -9,6 +9,11 @@ import type {
   PersonSummaryItem,
   PersonTimelineResponse,
   RegisterVisitorPayload,
+  DailyCheckinResponse,
+  HourlyDwellResponse,
+  ReviewQueueCandidate,
+  ReconcileIdentityPayload,
+  PhotoSearchResponse,
 } from '@/types/advancedpeopleanalytics';
 
 export const APA_ENDPOINTS = {
@@ -20,12 +25,19 @@ export const APA_ENDPOINTS = {
   SESSION_DETAIL: (id: string) => `/advancedpeopleanalytics/sessions/${id}`,
   SESSION_PEOPLE: (id: string) => `/advancedpeopleanalytics/sessions/${id}/people`,
   SESSION_VIDEO: (id: string) => `/advancedpeopleanalytics/sessions/${id}/video`,
+  RERUN_SESSION: (id: string) => `/advancedpeopleanalytics/sessions/${id}/rerun`,
   PEOPLE: '/advancedpeopleanalytics/people',
   TIMELINE: '/advancedpeopleanalytics/timeline',
   ASSOCIATE: '/advancedpeopleanalytics/associate',
   REGISTER_VISITOR: '/advancedpeopleanalytics/visitors/register',
+  VISITOR_DELETE: (id: string) => `/advancedpeopleanalytics/visitors/${id}`,
   ADD_FROM_FACE: '/advancedpeopleanalytics/visitors/add-from-face',
   RESET: '/advancedpeopleanalytics/reset',
+  DAILY_CHECKIN: (employeeId: string) => `/advancedpeopleanalytics/employees/${employeeId}/daily-checkin`,
+  HOURLY_DWELL: '/advancedpeopleanalytics/analytics/hourly-dwell',
+  REVIEW_QUEUE: '/advancedpeopleanalytics/review-queue',
+  RECONCILE_IDENTITY: (identityId: string) => `/advancedpeopleanalytics/identities/${identityId}/reconcile`,
+  SEARCH_PHOTO: '/advancedpeopleanalytics/search/photo',
 };
 
 // ==========================================
@@ -168,6 +180,8 @@ export async function processBatchSessions(payload: {
     video_source_type: string;
     line_start?: number[] | null;
     line_end?: number[] | null;
+    start_time?: number | null;
+    end_time?: number | null;
   }>;
   global_line_start?: number[] | null;
   global_line_end?: number[] | null;
@@ -178,6 +192,9 @@ export async function processBatchSessions(payload: {
   track_repeat_visitors?: boolean;
   line_crossing_analysis?: boolean;
   track_occupancy?: boolean;
+  generate_video?: boolean;
+  start_time?: number | null;
+  end_time?: number | null;
 }): Promise<ApiResponse<AdvancedAnalyticsSession[]>> {
   try {
     const response = await apiClient.post<ApiResponse<AdvancedAnalyticsSession[]>>(
@@ -221,6 +238,17 @@ export async function deleteAdvancedSession(sessionId: string): Promise<ApiRespo
   }
 }
 
+export async function rerunAdvancedSession(sessionId: string): Promise<ApiResponse<AdvancedAnalyticsSession>> {
+  try {
+    const response = await apiClient.post<ApiResponse<AdvancedAnalyticsSession>>(
+      APA_ENDPOINTS.RERUN_SESSION(sessionId),
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to rerun session');
+  }
+}
+
 export async function getSessionDetectedPeople(sessionId: string): Promise<ApiResponse<SessionDetectedPerson[]>> {
   try {
     const response = await apiClient.get<ApiResponse<SessionDetectedPerson[]>>(
@@ -233,7 +261,12 @@ export async function getSessionDetectedPeople(sessionId: string): Promise<ApiRe
 }
 
 export function getAnnotatedVideoUrl(sessionId: string): string {
-  return `${API_BASE_URL}${APA_ENDPOINTS.SESSION_VIDEO(sessionId)}`;
+  let token = '';
+  if (typeof window !== 'undefined') {
+    token = localStorage.getItem('vigilens_access_token') || localStorage.getItem('access_token') || '';
+  }
+  const tokenQuery = token ? `?token=${encodeURIComponent(token)}` : '';
+  return `${API_BASE_URL}${APA_ENDPOINTS.SESSION_VIDEO(sessionId)}${tokenQuery}`;
 }
 
 // ==========================================
@@ -290,6 +323,15 @@ export async function registerOrUpdateVisitor(payload: RegisterVisitorPayload): 
   }
 }
 
+export async function deleteVisitorIdentity(identityId: string): Promise<ApiResponse<any>> {
+  try {
+    const response = await apiClient.delete<ApiResponse<any>>(APA_ENDPOINTS.VISITOR_DELETE(identityId));
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to delete visitor profile');
+  }
+}
+
 export async function addPersonFromFacePhoto(formData: FormData): Promise<ApiResponse<any>> {
   try {
     const response = await apiClient.post<ApiResponse<any>>(APA_ENDPOINTS.ADD_FROM_FACE, formData, {
@@ -318,5 +360,99 @@ export async function resetAnalyticsData(): Promise<ApiResponse<any>> {
     return response.data;
   } catch (error) {
     return handleApiError(error, 'Failed to reset analytics data');
+  }
+}
+
+// ==========================================
+// DAILY CHECK-IN & HOURLY DWELL & REVIEW QUEUE
+// ==========================================
+
+export async function dailyEmployeeCheckin(
+  employeeId: string,
+  formData: FormData
+): Promise<ApiResponse<DailyCheckinResponse>> {
+  try {
+    const response = await apiClient.post<ApiResponse<DailyCheckinResponse>>(
+      APA_ENDPOINTS.DAILY_CHECKIN(employeeId),
+      formData,
+      { headers: { 'Content-Type': 'multipart/form-data' } }
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to process daily employee check-in');
+  }
+}
+
+export async function getHourlyAreaDwell(params?: {
+  target_date?: string;
+  person_id?: string;
+  session_id?: string;
+}): Promise<ApiResponse<HourlyDwellResponse>> {
+  try {
+    const cleanParams: Record<string, string> = {};
+    if (params?.target_date) cleanParams.target_date = params.target_date;
+    if (params?.person_id) cleanParams.person_id = params.person_id;
+    if (params?.session_id) cleanParams.session_id = params.session_id;
+
+    const response = await apiClient.get<ApiResponse<HourlyDwellResponse>>(
+      APA_ENDPOINTS.HOURLY_DWELL,
+      { params: cleanParams }
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to fetch hourly dwell analytics');
+  }
+}
+
+export async function getReviewQueue(targetDate?: string): Promise<ApiResponse<ReviewQueueCandidate[]>> {
+  try {
+    const cleanParams: Record<string, string> = {};
+    if (targetDate) cleanParams.target_date = targetDate;
+
+    const response = await apiClient.get<ApiResponse<ReviewQueueCandidate[]>>(
+      APA_ENDPOINTS.REVIEW_QUEUE,
+      { params: cleanParams }
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to fetch identity review queue');
+  }
+}
+
+export async function reconcileIdentity(
+  identityId: string,
+  payload: ReconcileIdentityPayload
+): Promise<ApiResponse<any>> {
+  try {
+    const response = await apiClient.post<ApiResponse<any>>(
+      APA_ENDPOINTS.RECONCILE_IDENTITY(identityId),
+      payload
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to reconcile identity');
+  }
+}
+
+export async function searchByPhoto(
+  file: File,
+  threshold: number = 0.55,
+  limit: number = 20
+): Promise<ApiResponse<PhotoSearchResponse>> {
+  try {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const response = await apiClient.post<ApiResponse<PhotoSearchResponse>>(
+      APA_ENDPOINTS.SEARCH_PHOTO,
+      formData,
+      {
+        params: { threshold, limit },
+        headers: { 'Content-Type': 'multipart/form-data' },
+      }
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to perform AI vector search by photo');
   }
 }
