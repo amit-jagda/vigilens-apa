@@ -192,6 +192,8 @@ export async function processBatchSessions(payload: {
   track_repeat_visitors?: boolean;
   line_crossing_analysis?: boolean;
   track_occupancy?: boolean;
+  track_objects?: boolean;
+  classes_to_track?: string[];
   generate_video?: boolean;
   start_time?: number | null;
   end_time?: number | null;

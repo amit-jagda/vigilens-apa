@@ -11,7 +11,8 @@ const SUGGESTIONS = [
   'Who visited yesterday?',
   'Which area had the highest foot traffic?',
   'Who stayed the longest on premises?',
-  'List all staff identified via face recognition',
+  'List all persons carrying a backpack or laptop',
+  'What objects were detected in recent video sessions?',
   'Show all new visitors detected this week',
 ];
 

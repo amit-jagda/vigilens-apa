@@ -71,6 +71,9 @@ export interface AdvancedAnalyticsSession {
   entry_count?: number;
   line_crossings_out_count?: number;
   exit_count?: number;
+  track_objects?: boolean;
+  classes_to_track?: string[];
+  detected_objects_summary?: Record<string, number>;
   started_at?: string;
   completed_at?: string;
   recording_started_at?: string;
@@ -106,6 +109,7 @@ export interface SessionDetectedPerson {
   camera_name?: string;
   appearances_count?: number;
   segments?: PersonAppearanceSegment[];
+  associated_objects?: string[];
 }
 
 export interface PersonSummaryItem {
@@ -121,6 +125,7 @@ export interface PersonSummaryItem {
   first_seen_at: string;
   last_seen_at: string;
   latest_event_type: string;
+  associated_objects?: string[];
 }
 
 export interface TimelineEventItem {
@@ -135,6 +140,7 @@ export interface TimelineEventItem {
   identity_confidence: number;
   tracker_id: number;
   duration_seconds: number;
+  associated_objects?: string[];
 }
 
 export interface PersonTimelineResponse {
