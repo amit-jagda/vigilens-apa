@@ -189,16 +189,23 @@ export default function PeopleDirectoryPage() {
         </div>
       ) : people.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {people.map((person) => (
-            <PersonCard
-              key={`${person.person_type}-${person.person_id}`}
-              person={person}
-              onViewJourney={(p) =>
-                router.push(`/people/${p.person_id}?type=${p.person_type}`)
-              }
-              onDelete={handleDeleteVisitor}
-            />
-          ))}
+          {(() => {
+            const maxDwellSeconds = Math.max(
+              ...people.map((p) => p.total_dwell_seconds || 0),
+              10
+            );
+            return people.map((person) => (
+              <PersonCard
+                key={`${person.person_type}-${person.person_id}`}
+                person={person}
+                maxDwellSeconds={maxDwellSeconds}
+                onViewJourney={(p) =>
+                  router.push(`/people/${p.person_id}?type=${p.person_type}`)
+                }
+                onDelete={handleDeleteVisitor}
+              />
+            ));
+          })()}
         </div>
       ) : (
         <div className="rounded-2xl border border-dashed border-border bg-accent/10 p-12 text-center">

@@ -407,12 +407,18 @@ function PersonJourneyContent() {
               </span>
               <div className="h-1.5 w-full overflow-hidden rounded-full bg-accent/60">
                 <div
-                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-primary"
+                  className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-primary transition-all duration-500"
                   style={{
-                    width: `${Math.min(
-                      100,
-                      Math.max(10, Math.round(((personInfo?.total_dwell_seconds || 0) / 3600) * 100))
-                    )}%`,
+                    width: `${(() => {
+                      const dwell = personInfo?.total_dwell_seconds || 0;
+                      if (dwell <= 0) return 0;
+                      // Dynamic scaling: calculate relative to active timeline / clip duration
+                      const timelineMax = timelineData?.events?.length
+                        ? Math.max(...timelineData.events.map((e) => e.duration_seconds || 0), dwell)
+                        : dwell;
+                      const refMax = Math.max(timelineMax, 30);
+                      return Math.min(100, Math.max(10, Math.round((dwell / refMax) * 100)));
+                    })()}%`,
                   }}
                 />
               </div>

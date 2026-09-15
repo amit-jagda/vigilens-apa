@@ -25,6 +25,7 @@ interface PersonCardProps {
   person: PersonSummaryItem;
   onViewJourney: (person: PersonSummaryItem) => void;
   onDelete?: (person: PersonSummaryItem) => void;
+  maxDwellSeconds?: number;
 }
 
 const OBJECT_ICONS: Record<string, string> = {
@@ -42,7 +43,7 @@ const OBJECT_ICONS: Record<string, string> = {
   book: '📖',
 };
 
-export function PersonCard({ person, onViewJourney, onDelete }: PersonCardProps) {
+export function PersonCard({ person, onViewJourney, onDelete, maxDwellSeconds }: PersonCardProps) {
   const isEmployee = person.person_type === 'employee';
   const [isConfirmingDelete, setIsConfirmingDelete] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -65,8 +66,12 @@ export function PersonCard({ person, onViewJourney, onDelete }: PersonCardProps)
     }
   };
 
-  // Calculate dwell intensity percentage for visual progress bar (max reference 1 hour = 3600s)
-  const dwellPercentage = Math.min(100, Math.max(8, Math.round((person.total_dwell_seconds / 3600) * 100)));
+  // Dynamic relative scaling: Compare against the highest dwell in the current video session/directory
+  const effectiveMax = Math.max(maxDwellSeconds || 0, 30);
+  const dwellPercentage = Math.min(
+    100,
+    Math.max(6, Math.round(((person.total_dwell_seconds || 0) / effectiveMax) * 100))
+  );
 
   return (
     <div
