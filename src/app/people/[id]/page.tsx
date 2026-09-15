@@ -25,6 +25,7 @@ import {
   deleteVisitorIdentity,
 } from '@/lib/api/advancedpeopleanalytics';
 import { listEmployees, getEmployeePhotoUrl } from '@/lib/api/employees';
+import { usePeopleStore } from '@/stores/peopleStore';
 import { JourneyPathway } from '@/components/people/JourneyPathway';
 import { HourlyDwellChart } from '@/components/people/HourlyDwellChart';
 import { getMediaCropUrl } from '@/lib/apiClient';
@@ -39,6 +40,7 @@ function PersonJourneyContent() {
   const params = useParams();
   const searchParams = useSearchParams();
   const router = useRouter();
+  const { fetchPersonJourney, deleteVisitor } = usePeopleStore();
 
   const personId = params?.id as string;
   const initialPersonType = (searchParams?.get('type') || 'visitor') as 'employee' | 'visitor';
@@ -65,11 +67,9 @@ function PersonJourneyContent() {
   const handleDeleteVisitorProfile = async () => {
     setIsDeletingPerson(true);
     try {
-      const res = await deleteVisitorIdentity(currentPersonId);
-      toast.success(res?.message || 'Visitor profile deleted successfully');
+      await deleteVisitor(currentPersonId);
       router.replace('/people');
     } catch (err: any) {
-      toast.error(err?.message || 'Failed to delete visitor profile');
       setIsDeletingPerson(false);
       setIsDeleteConfirmOpen(false);
     }
@@ -109,25 +109,15 @@ function PersonJourneyContent() {
   const loadPersonAndJourney = async (overrideType?: 'employee' | 'visitor', overrideId?: string) => {
     const activeType = overrideType || currentPersonType;
     const activeId = overrideId || currentPersonId;
-    setIsLoading(true);
+    if (!timelineData && !personInfo) {
+      setIsLoading(true);
+    }
     try {
-      // 1. Fetch Timeline
-      const timelineRes = await getPersonTimeline(activeType, activeId);
-      if (timelineRes?.data) {
-        setTimelineData(timelineRes.data);
-      }
-
-      // 2. Fetch Person Directory metadata
-      const peopleRes = await listPeopleDirectory({ search: activeId });
-      let found = peopleRes?.data?.find((p) => p.person_id === activeId || (p as any).identity_id === activeId);
-      if (!found && peopleRes?.data && peopleRes.data.length > 0) {
-        found = peopleRes.data[0];
-      }
-      if (found) {
-        setPersonInfo(found);
-        if (found.person_type) {
-          setCurrentPersonType(found.person_type);
-        }
+      const { timeline, info } = await fetchPersonJourney(activeId, activeType);
+      if (timeline) setTimelineData(timeline);
+      if (info) {
+        setPersonInfo(info);
+        if (info.person_type) setCurrentPersonType(info.person_type);
       }
     } catch (err: any) {
       toast.error('Failed to load person journey details');
