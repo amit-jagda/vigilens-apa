@@ -43,11 +43,17 @@ export interface ApaStoreState {
   // Active Session & Results
   activeSessionId: string | null;
 
+  // Global Modals
+  isSearchByPhotoOpen: boolean;
+  isDailyCheckinOpen: boolean;
+
   // Setters / Actions
   setMainTab: (tab: 'analytics' | 'people' | 'history') => void;
   setActiveStep: (step: 1 | 2 | 3) => void;
   setTopologyViewMode: (mode: 'graph' | 'list') => void;
   setSelectedJourneyDate: (date: string) => void;
+  setIsSearchByPhotoOpen: (open: boolean) => void;
+  setIsDailyCheckinOpen: (open: boolean) => void;
 
   setSimilarityThreshold: (val: number) => void;
   setConfidenceThreshold: (val: number) => void;
@@ -125,11 +131,17 @@ export const useApaStore = create<ApaStoreState>()(
       // Active Session
       activeSessionId: null,
 
+      // Global Modals
+      isSearchByPhotoOpen: false,
+      isDailyCheckinOpen: false,
+
       // Actions
       setMainTab: (mainTab) => set({ mainTab }),
       setActiveStep: (activeStep) => set({ activeStep }),
       setTopologyViewMode: (topologyViewMode) => set({ topologyViewMode }),
       setSelectedJourneyDate: (selectedJourneyDate) => set({ selectedJourneyDate }),
+      setIsSearchByPhotoOpen: (isSearchByPhotoOpen) => set({ isSearchByPhotoOpen }),
+      setIsDailyCheckinOpen: (isDailyCheckinOpen) => set({ isDailyCheckinOpen }),
 
       setSimilarityThreshold: (similarityThreshold) => set({ similarityThreshold }),
       setConfidenceThreshold: (confidenceThreshold) => set({ confidenceThreshold }),

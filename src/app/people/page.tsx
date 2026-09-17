@@ -15,8 +15,7 @@ import {
   BarChart3,
   UserCheck,
 } from 'lucide-react';
-import { listPeopleDirectory, deleteVisitorIdentity } from '@/lib/api/advancedpeopleanalytics';
-import toast from 'react-hot-toast';
+import { usePeopleStore } from '@/stores/peopleStore';
 import { PersonCard } from '@/components/people/PersonCard';
 import { DailyCheckinModal } from '@/components/people/DailyCheckinModal';
 import { ReviewQueueBanner } from '@/components/people/ReviewQueueBanner';
@@ -25,56 +24,39 @@ import type { PersonSummaryItem } from '@/types/advancedpeopleanalytics';
 
 export default function PeopleDirectoryPage() {
   const router = useRouter();
-  const [people, setPeople] = useState<PersonSummaryItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isDailyCheckinOpen, setIsDailyCheckinOpen] = useState(false);
-  const [showHourlyAnalytics, setShowHourlyAnalytics] = useState(false);
+  const {
+    people,
+    isLoading,
+    roleFilter,
+    dateFilter,
+    searchQuery,
+    showHourlyAnalytics,
+    isDailyCheckinOpen,
+    setRoleFilter,
+    setDateFilter,
+    setSearchQuery,
+    setShowHourlyAnalytics,
+    setIsDailyCheckinOpen,
+    fetchPeople,
+    deleteVisitor,
+  } = usePeopleStore();
 
   const handleDeleteVisitor = async (person: PersonSummaryItem) => {
-    try {
-      const res = await deleteVisitorIdentity(person.person_id);
-      toast.success(res?.message || 'Visitor profile deleted successfully');
-      setPeople((prev) => prev.filter((p) => p.person_id !== person.person_id));
-    } catch (err: any) {
-      toast.error(err?.message || 'Failed to delete visitor profile');
-    }
+    await deleteVisitor(person.person_id);
   };
-
-  // Filters
-  const [roleFilter, setRoleFilter] = useState<'all' | 'employee' | 'visitor'>('all');
-  const [dateFilter, setDateFilter] = useState<string>('');
-  const [searchQuery, setSearchQuery] = useState<string>('');
 
   useEffect(() => {
     fetchPeople();
   }, [roleFilter, dateFilter]);
 
-  const fetchPeople = async () => {
-    setIsLoading(true);
-    try {
-      const res = await listPeopleDirectory({
-        person_type: roleFilter,
-        date: dateFilter || undefined,
-        search: searchQuery || undefined,
-      });
-      if (res?.data) {
-        setPeople(res.data);
-      }
-    } catch (err) {
-      // Handled
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
   const handleSearchKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter') {
-      fetchPeople();
+      fetchPeople(true);
     }
   };
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-8 max-w-7xl mx-auto p-6 md:p-8">
       {/* Top Banner & Metric Badges */}
       <div className="rounded-2xl border border-border bg-card p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
@@ -156,7 +138,7 @@ export default function PeopleDirectoryPage() {
                 type="button"
                 onClick={() => {
                   setSearchQuery('');
-                  setTimeout(fetchPeople, 50);
+                  fetchPeople(true);
                 }}
                 className="absolute right-3 text-muted-foreground hover:text-foreground"
               >
@@ -207,16 +189,23 @@ export default function PeopleDirectoryPage() {
         </div>
       ) : people.length > 0 ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
-          {people.map((person) => (
-            <PersonCard
-              key={`${person.person_type}-${person.person_id}`}
-              person={person}
-              onViewJourney={(p) =>
-                router.push(`/people/${p.person_id}?type=${p.person_type}`)
-              }
-              onDelete={handleDeleteVisitor}
-            />
-          ))}
+          {(() => {
+            const maxDwellSeconds = Math.max(
+              ...people.map((p) => p.total_dwell_seconds || 0),
+              10
+            );
+            return people.map((person) => (
+              <PersonCard
+                key={`${person.person_type}-${person.person_id}`}
+                person={person}
+                maxDwellSeconds={maxDwellSeconds}
+                onViewJourney={(p) =>
+                  router.push(`/people/${p.person_id}?type=${p.person_type}`)
+                }
+                onDelete={handleDeleteVisitor}
+              />
+            ));
+          })()}
         </div>
       ) : (
         <div className="rounded-2xl border border-dashed border-border bg-accent/10 p-12 text-center">

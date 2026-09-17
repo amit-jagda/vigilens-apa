@@ -42,6 +42,12 @@ const NAV_ITEMS = [
     description: 'Staff Face Enrollment',
   },
   {
+    name: 'Daily Check-Ins',
+    href: '/checkin',
+    icon: ShieldCheck,
+    description: 'Daily Appearance & Outfit Anchors',
+  },
+  {
     name: 'AI Assistant',
     href: '/assistant',
     icon: Sparkles,
@@ -49,6 +55,7 @@ const NAV_ITEMS = [
     badge: 'AI',
   },
 ];
+
 
 export function Sidebar() {
   const pathname = usePathname();

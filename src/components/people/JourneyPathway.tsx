@@ -238,6 +238,38 @@ export function JourneyPathway({ timelineData }: JourneyPathwayProps) {
                               </span>
                             </div>
                           </div>
+
+                          {/* Associated / Carried Objects */}
+                          {evt.associated_objects && evt.associated_objects.length > 0 && (
+                            <div className="mt-3 pt-2.5 border-t border-border/40 flex items-center gap-2 flex-wrap">
+                              <span className="text-[11px] font-medium text-muted-foreground">Carried Objects:</span>
+                              {evt.associated_objects.map((obj) => {
+                                const objIcons: Record<string, string> = {
+                                  backpack: '🎒',
+                                  handbag: '👜',
+                                  suitcase: '🧳',
+                                  umbrella: '☂️',
+                                  laptop: '💻',
+                                  mouse: '🖱️',
+                                  keyboard: '⌨️',
+                                  'cell phone': '📱',
+                                  remote: '📺',
+                                  bottle: '💧',
+                                  cup: '☕',
+                                  book: '📖',
+                                };
+                                const icon = objIcons[obj.toLowerCase()] || '📦';
+                                return (
+                                  <span
+                                    key={obj}
+                                    className="inline-flex items-center gap-1 rounded-md bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 text-[11px] font-semibold text-amber-400 capitalize"
+                                  >
+                                    <span>{icon}</span> {obj}
+                                  </span>
+                                );
+                              })}
+                            </div>
+                          )}
                         </div>
 
                         {/* Transit Connector between cameras */}

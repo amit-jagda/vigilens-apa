@@ -2,6 +2,13 @@ export interface EntityItem {
   type: 'person' | 'camera' | 'zone' | 'date';
   id?: string;
   label: string;
+  photo_path?: string | null;
+  photo_url?: string | null;
+  dwell_seconds?: number;
+  dwell_formatted?: string;
+  person_type?: string;
+  employee_code?: string;
+  cameras_visited?: string[];
 }
 
 export interface ChatMessage {
@@ -10,7 +17,9 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   metadata?: {
+    response_format?: 'employee_roster' | 'person_dossier' | 'visitor_roster' | 'camera_traffic' | 'journey_path' | 'object_inventory' | 'general';
     entities?: EntityItem[];
+    raw_results?: Record<string, any>[];
     suggested_actions?: string[];
     sql_query?: string;
     execution_time_ms?: number;
@@ -30,6 +39,7 @@ export interface AssistantQueryPayload {
 
 export interface AssistantQueryResponse {
   answer: string;
+  response_format?: 'employee_roster' | 'person_dossier' | 'visitor_roster' | 'camera_traffic' | 'journey_path' | 'object_inventory' | 'general';
   session_id?: string;
   sql_query?: string;
   raw_results?: Record<string, any>[];

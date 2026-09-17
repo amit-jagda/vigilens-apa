@@ -14,6 +14,7 @@ import type {
   ReviewQueueCandidate,
   ReconcileIdentityPayload,
   PhotoSearchResponse,
+  DailyCheckinRecord,
 } from '@/types/advancedpeopleanalytics';
 
 export const APA_ENDPOINTS = {
@@ -34,11 +35,13 @@ export const APA_ENDPOINTS = {
   ADD_FROM_FACE: '/advancedpeopleanalytics/visitors/add-from-face',
   RESET: '/advancedpeopleanalytics/reset',
   DAILY_CHECKIN: (employeeId: string) => `/advancedpeopleanalytics/employees/${employeeId}/daily-checkin`,
+  DAILY_CHECKINS: '/advancedpeopleanalytics/daily-checkins',
   HOURLY_DWELL: '/advancedpeopleanalytics/analytics/hourly-dwell',
   REVIEW_QUEUE: '/advancedpeopleanalytics/review-queue',
   RECONCILE_IDENTITY: (identityId: string) => `/advancedpeopleanalytics/identities/${identityId}/reconcile`,
   SEARCH_PHOTO: '/advancedpeopleanalytics/search/photo',
 };
+
 
 // ==========================================
 // CAMERAS & SPATIAL TOPOLOGY
@@ -192,6 +195,8 @@ export async function processBatchSessions(payload: {
   track_repeat_visitors?: boolean;
   line_crossing_analysis?: boolean;
   track_occupancy?: boolean;
+  track_objects?: boolean;
+  classes_to_track?: string[];
   generate_video?: boolean;
   start_time?: number | null;
   end_time?: number | null;
@@ -382,6 +387,30 @@ export async function dailyEmployeeCheckin(
     return handleApiError(error, 'Failed to process daily employee check-in');
   }
 }
+
+export async function listDailyCheckins(params?: {
+  checkin_date?: string;
+  employee_id?: string;
+  start_date?: string;
+  end_date?: string;
+}): Promise<ApiResponse<DailyCheckinRecord[]>> {
+  try {
+    const cleanParams: Record<string, string> = {};
+    if (params?.checkin_date) cleanParams.checkin_date = params.checkin_date;
+    if (params?.employee_id) cleanParams.employee_id = params.employee_id;
+    if (params?.start_date) cleanParams.start_date = params.start_date;
+    if (params?.end_date) cleanParams.end_date = params.end_date;
+
+    const response = await apiClient.get<ApiResponse<DailyCheckinRecord[]>>(
+      APA_ENDPOINTS.DAILY_CHECKINS,
+      { params: cleanParams }
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to retrieve daily check-in records');
+  }
+}
+
 
 export async function getHourlyAreaDwell(params?: {
   target_date?: string;

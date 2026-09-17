@@ -1,7 +1,7 @@
 /* eslint-disable @next/next/no-img-element */
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useMemo } from 'react';
 import { useDropzone } from 'react-dropzone';
 import { cn } from '@/lib/utils';
 import {
@@ -16,6 +16,7 @@ import {
   Camera,
   UserCircle2,
   Eye,
+  Clock,
 } from 'lucide-react';
 import {
   getEmployeePhotoUrl,
@@ -36,6 +37,46 @@ function formatDate(iso: string): string {
 
 function formatDateOnly(iso: string): string {
   return new Date(iso).toLocaleDateString(undefined, { dateStyle: 'medium' });
+}
+
+function formatTimeOnly(iso: string): string {
+  try {
+    const d = new Date(iso);
+    return d.toLocaleTimeString(undefined, {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function formatGroupDateHeader(dateStr: string): string {
+  try {
+    const parts = dateStr.split('-');
+    if (parts.length === 3) {
+      const year = parseInt(parts[0], 10);
+      const month = parseInt(parts[1], 10) - 1;
+      const day = parseInt(parts[2], 10);
+      const d = new Date(year, month, day);
+      return d.toLocaleDateString(undefined, {
+        weekday: 'short',
+        day: 'numeric',
+        month: 'short',
+        year: 'numeric',
+      });
+    }
+    const d = new Date(dateStr);
+    return d.toLocaleDateString(undefined, {
+      weekday: 'short',
+      day: 'numeric',
+      month: 'short',
+      year: 'numeric',
+    });
+  } catch {
+    return dateStr;
+  }
 }
 
 function formatDwell(seconds: number): string {
@@ -534,6 +575,45 @@ function AttendanceLogsTab() {
     return fullName.includes(query) || code.includes(query);
   });
 
+  // Group filtered logs date-wise (descending by date and entry time)
+  const groupedLogs = useMemo(() => {
+    const groups: {
+      [dateKey: string]: {
+        dateStr: string;
+        logs: AttendanceLog[];
+        totalDwell: number;
+        uniqueEmployees: Set<string>;
+      };
+    } = {};
+
+    const sorted = [...filteredLogs].sort((a, b) => {
+      const timeA = new Date(a.employee_entry_timestamp).getTime();
+      const timeB = new Date(b.employee_entry_timestamp).getTime();
+      return timeB - timeA;
+    });
+
+    sorted.forEach((log) => {
+      const entryDate = log.employee_entry_timestamp
+        ? log.employee_entry_timestamp.split('T')[0]
+        : 'Unknown Date';
+      if (!groups[entryDate]) {
+        groups[entryDate] = {
+          dateStr: entryDate,
+          logs: [],
+          totalDwell: 0,
+          uniqueEmployees: new Set(),
+        };
+      }
+      groups[entryDate].logs.push(log);
+      groups[entryDate].totalDwell += log.dwell_time || 0;
+      if (log.employee?.id) {
+        groups[entryDate].uniqueEmployees.add(log.employee.id);
+      }
+    });
+
+    return Object.values(groups);
+  }, [filteredLogs]);
+
   return (
     <div className="space-y-4">
       <div className="space-y-2">
@@ -621,70 +701,135 @@ function AttendanceLogsTab() {
         )}
       </div>
 
-      <div className="rounded-xl border border-border bg-card">
-        <div className="border-b border-border px-5 py-3">
+      <div className="space-y-4">
+        <div className="flex items-center justify-between px-1">
           <p className="text-xs font-semibold text-muted-foreground">
-            Attendance Logs ({filteredLogs.length})
+            Attendance Logs ({filteredLogs.length} Records across {groupedLogs.length} Days)
           </p>
         </div>
+
         {loading ? (
-          <div className="flex h-32 items-center justify-center">
+          <div className="flex h-32 items-center justify-center rounded-xl border border-border bg-card">
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : filteredLogs.length === 0 ? (
-          <div className="flex h-32 items-center justify-center">
+          <div className="flex h-32 items-center justify-center rounded-xl border border-border bg-card">
             <p className="text-sm text-muted-foreground">
               No attendance records match your search criteria.
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-xs">
-              <thead>
-                <tr className="border-b border-border bg-accent/20">
-                  {[
-                    'Employee',
-                    'Code',
-                    'Entry Timestamp',
-                    'Exit Timestamp',
-                    'Dwell Time',
-                  ].map((h) => (
-                    <th
-                      key={h}
-                      className="px-4 py-2.5 text-left font-semibold text-muted-foreground"
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-border">
-                {filteredLogs.map((log) => (
-                  <tr
-                    key={log.id}
-                    className="transition-colors hover:bg-accent/30"
-                  >
-                    <td className="px-4 py-3 font-semibold text-foreground">
-                      {log.employee?.first_name || '—'} {log.employee?.last_name || ''}
-                    </td>
-                    <td className="px-4 py-3 font-mono text-muted-foreground">
-                      {log.employee?.employee_code || '—'}
-                    </td>
-                    <td className="px-4 py-3 text-foreground">
-                      {formatDate(log.employee_entry_timestamp)}
-                    </td>
-                    <td className="px-4 py-3 text-foreground">
-                      {log.employee_exit_timestamp
-                        ? formatDate(log.employee_exit_timestamp)
-                        : 'Present'}
-                    </td>
-                    <td className="px-4 py-3 text-primary font-semibold">
-                      {formatDwell(log.dwell_time)}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <div className="space-y-4">
+            {groupedLogs.map((group) => (
+              <div
+                key={group.dateStr}
+                className="rounded-xl border border-border bg-card overflow-hidden shadow-sm"
+              >
+                {/* Date Group Header Banner */}
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-accent/30 px-5 py-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary border border-primary/20">
+                      <CalendarDays className="h-3.5 w-3.5" />
+                    </div>
+                    <div>
+                      <span className="text-sm font-bold text-foreground">
+                        {formatGroupDateHeader(group.dateStr)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="rounded-md bg-accent/80 px-2 py-0.5 font-medium text-muted-foreground border border-border/80">
+                      👥 {group.uniqueEmployees.size}{' '}
+                      {group.uniqueEmployees.size === 1 ? 'Employee' : 'Employees'}
+                    </span>
+                    <span className="rounded-md bg-emerald-500/10 px-2 py-0.5 font-semibold text-emerald-400 border border-emerald-500/20">
+                      ⏱ Total: {formatDwell(group.totalDwell)}
+                    </span>
+                    <span className="rounded-md bg-primary/10 px-2 py-0.5 font-bold text-primary border border-primary/20">
+                      {group.logs.length}{' '}
+                      {group.logs.length === 1 ? 'Check-in' : 'Check-ins'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Date Group Table */}
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs">
+                    <thead>
+                      <tr className="border-b border-border/60 bg-accent/10">
+                        {[
+                          'Employee',
+                          'Code',
+                          'Entry Time',
+                          'Exit Time',
+                          'Dwell Time',
+                        ].map((h) => (
+                          <th
+                            key={h}
+                            className="px-4 py-2.5 text-left font-semibold text-muted-foreground"
+                          >
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-border/60">
+                      {group.logs.map((log) => (
+                        <tr
+                          key={log.id}
+                          className="transition-colors hover:bg-accent/30"
+                        >
+                          <td className="px-4 py-3 font-semibold text-foreground">
+                            <div className="flex items-center gap-2">
+                              {log.employee?.photo_path ? (
+                                <img
+                                  src={getEmployeePhotoUrl(log.employee.photo_path)}
+                                  alt=""
+                                  className="h-6 w-6 rounded-full object-cover border border-border shrink-0"
+                                />
+                              ) : (
+                                <div className="h-6 w-6 rounded-full bg-accent flex items-center justify-center text-[10px] font-bold text-muted-foreground shrink-0">
+                                  {log.employee?.first_name?.[0] || 'E'}
+                                </div>
+                              )}
+                              <span>
+                                {log.employee?.first_name || '—'}{' '}
+                                {log.employee?.last_name || ''}
+                              </span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-muted-foreground font-semibold">
+                            {log.employee?.employee_code || '—'}
+                          </td>
+                          <td className="px-4 py-3 font-mono font-medium text-foreground">
+                            <span className="inline-flex items-center gap-1 rounded bg-accent/60 px-1.5 py-0.5 border border-border/60">
+                              <Clock className="h-2.5 w-2.5 text-primary" />
+                              {formatTimeOnly(log.employee_entry_timestamp)}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-foreground">
+                            {log.employee_exit_timestamp ? (
+                              <span className="inline-flex items-center gap-1 rounded bg-accent/60 px-1.5 py-0.5 border border-border/60">
+                                <Clock className="h-2.5 w-2.5 text-muted-foreground" />
+                                {formatTimeOnly(log.employee_exit_timestamp)}
+                              </span>
+                            ) : (
+                              <span className="text-emerald-400 font-bold bg-emerald-500/10 px-2 py-0.5 rounded text-[11px] border border-emerald-500/20">
+                                Present
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-primary font-bold">
+                            {formatDwell(log.dwell_time)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -700,7 +845,7 @@ export default function StaffPage() {
   const [tab, setTab] = useState<Tab>('employees');
 
   return (
-    <div className="w-full space-y-6 max-w-7xl mx-auto">
+    <div className="w-full space-y-6 max-w-7xl mx-auto p-6 md:p-8">
       {/* Page Header */}
       <div className="flex items-center justify-between gap-4 border-b border-border/80 pb-4">
         <div>
