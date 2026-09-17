@@ -243,3 +243,18 @@ export interface PhotoSearchResponse {
   total_matches_found: number;
   matches: PhotoSearchMatchItem[];
 }
+
+export interface DailyCheckinRecord {
+  id: string;
+  employee_id: string;
+  employee_name: string;
+  employee_code?: string;
+  employee_photo?: string;
+  checkin_date: string;
+  face_photo_url: string;
+  appearance_photo_url?: string | null;
+  face_anchored: boolean;
+  appearance_anchored: boolean;
+  created_at: string;
+}
+

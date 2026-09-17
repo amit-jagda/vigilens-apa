@@ -66,13 +66,6 @@ export function PersonCard({ person, onViewJourney, onDelete, maxDwellSeconds }:
     }
   };
 
-  // Dynamic relative scaling: Compare against the highest dwell in the current video session/directory
-  const effectiveMax = Math.max(maxDwellSeconds || 0, 30);
-  const dwellPercentage = Math.min(
-    100,
-    Math.max(6, Math.round(((person.total_dwell_seconds || 0) / effectiveMax) * 100))
-  );
-
   return (
     <div
       onClick={() => onViewJourney(person)}
@@ -199,24 +192,14 @@ export function PersonCard({ person, onViewJourney, onDelete, maxDwellSeconds }:
 
       {/* Body: Visual Analytics Metrics */}
       <div className="p-5 space-y-4">
-        {/* Visual Dwell Intensity Bar */}
-        <div className="rounded-2xl border border-border/70 bg-accent/20 p-3.5 space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="text-muted-foreground font-medium flex items-center gap-1.5">
-              <Timer className="h-4 w-4 text-primary" /> Total On-Premises Dwell
-            </span>
-            <span className="font-extrabold text-foreground text-sm">
-              {formatDwellTime(person.total_dwell_seconds)}
-            </span>
-          </div>
-
-          {/* Dwell Fill Meter */}
-          <div className="h-2 w-full overflow-hidden rounded-full bg-accent/60">
-            <div
-              className="h-full rounded-full bg-gradient-to-r from-cyan-500 via-primary to-indigo-500 transition-all duration-500"
-              style={{ width: `${dwellPercentage}%` }}
-            />
-          </div>
+        {/* Total Dwell Time Box */}
+        <div className="rounded-2xl border border-border/70 bg-accent/20 px-3.5 py-2.5 flex items-center justify-between text-xs">
+          <span className="text-muted-foreground font-medium flex items-center gap-1.5">
+            <Timer className="h-4 w-4 text-primary" /> Total On-Premises Dwell
+          </span>
+          <span className="font-extrabold text-foreground text-sm">
+            {formatDwellTime(person.total_dwell_seconds)}
+          </span>
         </div>
 
         {/* Visual Camera Pathway Flow */}

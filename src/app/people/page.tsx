@@ -56,7 +56,7 @@ export default function PeopleDirectoryPage() {
   };
 
   return (
-    <div className="space-y-8 max-w-7xl mx-auto">
+    <div className="space-y-8 max-w-7xl mx-auto p-6 md:p-8">
       {/* Top Banner & Metric Badges */}
       <div className="rounded-2xl border border-border bg-card p-6 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>

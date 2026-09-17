@@ -30,6 +30,7 @@ import {
   X,
   Trash2,
   FileVideo,
+  Film,
   GitFork,
   Route,
   Sparkles,
@@ -47,6 +48,7 @@ import {
   AlertTriangle,
   LayoutGrid,
   List,
+  Columns,
 } from 'lucide-react';
 
 import { LineDrawingCanvas } from '@/components/LineDrawingCanvas';
@@ -55,6 +57,7 @@ import { DailyCheckinModal } from '@/components/people/DailyCheckinModal';
 import { SearchByPhotoModal } from '@/components/people/SearchByPhotoModal';
 import { ReviewQueueBanner } from '@/components/people/ReviewQueueBanner';
 import { HourlyDwellChart } from '@/components/people/HourlyDwellChart';
+import { VideoTimeRangeTrimmer } from '@/components/upload/VideoTimeRangeTrimmer';
 import {
   createCameraNode,
   updateCameraNode,
@@ -155,11 +158,13 @@ function VigilensAPAMainContent() {
     setShowLineCanvas,
     activeSessionId,
     setActiveSessionId,
+    isSearchByPhotoOpen,
+    setIsSearchByPhotoOpen,
+    isDailyCheckinOpen,
+    setIsDailyCheckinOpen,
   } = useApaStore();
 
   const [selectedPersonForJourney, setSelectedPersonForJourney] = useState<PersonSummaryItem | null>(null);
-  const [isDailyCheckinOpen, setIsDailyCheckinOpen] = useState(false);
-  const [isSearchByPhotoOpen, setIsSearchByPhotoOpen] = useState(false);
 
   // Video Source & Upload Local State
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -212,7 +217,8 @@ function VigilensAPAMainContent() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAssociating, setIsAssociating] = useState(false);
   const [playbackCurrentTime, setPlaybackCurrentTime] = useState<number>(0);
-  const [detectedViewMode, setDetectedViewMode] = useState<'grid' | 'list'>('grid');
+  const [detectedViewMode, setDetectedViewMode] = useState<'split' | 'grid' | 'table'>('split');
+  const [selectedPersonIndex, setSelectedPersonIndex] = useState<number>(0);
   const playbackVideoRef = React.useRef<HTMLVideoElement>(null);
 
   const handleSeekVideoToTime = (timeSec: number) => {
@@ -385,17 +391,26 @@ function VigilensAPAMainContent() {
   useEffect(() => {
     if (initialSessionId) {
       setActiveSessionId(initialSessionId);
-      setActiveStep(3);
       getSessionDetails(initialSessionId)
         .then((res) => {
           if (res?.data) {
             setSessionData(res.data);
-            fetchDetectedPeople(initialSessionId);
-            toast.success(`Loaded session: ${res.data.video_name}`);
+            const status = (res.data.status || '').toUpperCase();
+            if (status === 'COMPLETED') {
+              setActiveStep(3);
+              fetchDetectedPeople(initialSessionId);
+              toast.success(`Loaded session: ${res.data.video_name}`);
+            } else if (status === 'PROCESSING' || status === 'PENDING' || status === 'QUEUED') {
+              setActiveStep(2);
+              toast.success(`Tracking live processing for "${res.data.video_name}"`);
+            } else {
+              setActiveStep(2);
+            }
           }
         })
         .catch(() => {
           toast.error('Failed to load session details');
+          setActiveStep(1);
         });
     }
   }, [initialSessionId]);
@@ -699,6 +714,7 @@ function VigilensAPAMainContent() {
       const res = await getSessionDetectedPeople(sessionId);
       if (res?.data) {
         setDetectedPeople(res.data);
+        setSelectedPersonIndex(0);
       }
     } catch (err) {
       console.error('Failed to load detected people:', err);
@@ -711,10 +727,19 @@ function VigilensAPAMainContent() {
   const handleSelectPastSession = (session: AdvancedAnalyticsSession) => {
     setActiveSessionId(session.id);
     setSessionData(session);
-    setActiveStep(3);
-    fetchDetectedPeople(session.id);
+    const status = (session.status || '').toUpperCase();
+    if (status === 'COMPLETED') {
+      setActiveStep(3);
+      fetchDetectedPeople(session.id);
+      toast.success(`Loaded session "${session.video_name}"`);
+    } else if (status === 'PROCESSING' || status === 'PENDING' || status === 'QUEUED') {
+      setActiveStep(2);
+      toast.success(`Tracking live processing for "${session.video_name}"`);
+    } else {
+      setActiveStep(2);
+      toast.error(`Session status: ${session.status}`);
+    }
     setMainTab('analytics');
-    toast.success(`Loaded session "${session.video_name}"`);
   };
 
   // Rerun Past Session
@@ -837,92 +862,184 @@ function VigilensAPAMainContent() {
   };
 
   return (
-    <div className="space-y-6 max-w-7xl mx-auto">
-      {/* Top Header */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-border/80 pb-4">
-        <div className="flex items-center gap-2.5">
-          <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-md shadow-primary/20">
-            <Layers className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-xl font-bold text-foreground">
-              Advanced People & Spatial Analytics
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Spatio-temporal camera topology, segmentation ReID, multi-camera journeys, and dwell analytics
-            </p>
-          </div>
-        </div>
-
-        {/* Global Action Header Controls */}
-        <div className="flex items-center gap-2.5 flex-wrap">
-          <button
-            type="button"
-            onClick={() => setIsSearchByPhotoOpen(true)}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white text-xs font-bold shadow-md shadow-indigo-500/20 transition-all cursor-pointer"
-          >
-            <Camera className="h-4 w-4" />
-            <span>Search by Photo</span>
-            <span className="px-1.5 py-0.2 rounded text-[9px] bg-white/20 uppercase tracking-wide font-mono">
-              Vector DB
-            </span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setIsDailyCheckinOpen(true)}
-            className="flex items-center gap-1.5 px-3.5 py-2 rounded-xl border border-border bg-card hover:bg-accent text-foreground text-xs font-semibold shadow-sm transition-all cursor-pointer"
-          >
-            <UserCheck className="h-4 w-4 text-emerald-400" />
-            <span>Daily Check-in</span>
-          </button>
-        </div>
-      </div>
-
+    <div className="max-w-7xl mx-auto p-6 md:p-8 space-y-6">
       {/* ========================================================= */}
       {/* TAB 1: VIDEO ANALYTICS (With 3 Sub-Tabs: Topology | Processing | Results) */}
       {/* ========================================================= */}
       {mainTab === 'analytics' && !selectedPersonForJourney && (
         <div className="space-y-6">
-          {/* Sub-tabs Stepper Header */}
-          <div className="flex items-center justify-between border-b border-border pb-4">
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setActiveStep(1)}
-                className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
-                  activeStep === 1
-                    ? 'bg-primary text-primary-foreground shadow'
-                    : 'border border-border text-muted-foreground hover:bg-accent'
-                }`}
-              >
-                <Sliders className="h-3.5 w-3.5" /> 1. Topology & Setup
-              </button>
-              <button
-                type="button"
-                onClick={() => activeSessionId && setActiveStep(2)}
-                disabled={!activeSessionId}
-                className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
-                  activeStep === 2
-                    ? 'bg-primary text-primary-foreground shadow'
-                    : 'border border-border text-muted-foreground hover:bg-accent disabled:opacity-40'
-                }`}
-              >
-                <RefreshCw className={`h-3.5 w-3.5 ${activeStep === 2 ? 'animate-spin' : ''}`} /> 2. Processing
-              </button>
-              <button
-                type="button"
-                onClick={() => (sessionData?.status || '').toUpperCase() === 'COMPLETED' && setActiveStep(3)}
-                disabled={(sessionData?.status || '').toUpperCase() !== 'COMPLETED'}
-                className={`flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
-                  activeStep === 3
-                    ? 'bg-primary text-primary-foreground shadow'
-                    : 'border border-border text-muted-foreground hover:bg-accent disabled:opacity-40'
-                }`}
-              >
-                <Activity className="h-3.5 w-3.5" /> 3. Dashboard Stream (Results)
-              </button>
-            </div>
+          {/* Sub-tabs Stepper Header (Evenly Distributed, Compact 3-Stage Pipeline Bar) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 p-1 bg-card/60 border border-border/80 rounded-xl shadow-xs backdrop-blur-sm">
+            {/* Stage 1: Topology & Setup */}
+            <button
+              type="button"
+              onClick={() => setActiveStep(1)}
+              className={`flex items-center justify-between px-3.5 py-2 rounded-lg transition-all cursor-pointer text-left border ${
+                activeStep === 1
+                  ? 'bg-primary text-primary-foreground shadow-sm border-primary font-bold'
+                  : 'bg-card/40 border-border/60 hover:bg-accent/60 text-foreground hover:border-border'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`flex h-7 w-7 items-center justify-center rounded-lg shrink-0 ${
+                    activeStep === 1
+                      ? 'bg-white/20 text-white'
+                      : 'bg-primary/10 text-primary border border-primary/20'
+                  }`}
+                >
+                  <Sliders className="h-3.5 w-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-extrabold uppercase tracking-wider opacity-80">
+                      Step 1
+                    </span>
+                    <span className="text-xs font-bold truncate">Topology & Setup</span>
+                  </div>
+                  <p className={`text-[10px] truncate leading-tight ${activeStep === 1 ? 'text-white/80' : 'text-muted-foreground'}`}>
+                    Cameras & footage upload
+                  </p>
+                </div>
+              </div>
+              {activeStep === 1 && (
+                <span className="shrink-0 text-[9px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold ml-1">
+                  Active
+                </span>
+              )}
+            </button>
+
+            {/* Stage 2: Processing Engine (Disabled once Video is COMPLETED) */}
+            {(() => {
+              const sessionStatus = (sessionData?.status || '').toUpperCase();
+              const isCompleted = sessionStatus === 'COMPLETED';
+              const isRunning = sessionStatus === 'PROCESSING' || sessionStatus === 'PENDING' || sessionStatus === 'QUEUED';
+              const isStep2Disabled = !activeSessionId || isCompleted;
+
+              return (
+                <button
+                  type="button"
+                  onClick={() => !isStep2Disabled && setActiveStep(2)}
+                  disabled={isStep2Disabled}
+                  title={
+                    isCompleted
+                      ? 'Video is already processed. View results in Dashboard Stream (Step 3).'
+                      : !activeSessionId
+                      ? 'No active processing job'
+                      : 'View processing engine progress'
+                  }
+                  className={`flex items-center justify-between px-3.5 py-2 rounded-lg transition-all text-left border ${
+                    isStep2Disabled
+                      ? isCompleted
+                        ? 'opacity-60 cursor-not-allowed border-border/40 bg-card/20'
+                        : 'opacity-40 cursor-not-allowed border-border/40 bg-card/20'
+                      : activeStep === 2
+                      ? 'bg-primary text-primary-foreground shadow-sm border-primary font-bold cursor-pointer'
+                      : 'bg-card/40 border-border/60 hover:bg-accent/60 text-foreground hover:border-border cursor-pointer'
+                  }`}
+                >
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <div
+                      className={`flex h-7 w-7 items-center justify-center rounded-lg shrink-0 ${
+                        activeStep === 2
+                          ? 'bg-white/20 text-white'
+                          : isCompleted
+                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                          : isRunning
+                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                          : 'bg-accent text-muted-foreground border border-border'
+                      }`}
+                    >
+                      {isCompleted ? (
+                        <Check className="h-3.5 w-3.5 text-emerald-400" />
+                      ) : (
+                        <RefreshCw className={`h-3.5 w-3.5 ${activeStep === 2 || isRunning ? 'animate-spin' : ''}`} />
+                      )}
+                    </div>
+                    <div className="min-w-0">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-extrabold uppercase tracking-wider opacity-80">
+                          Step 2
+                        </span>
+                        <span className="text-xs font-bold truncate">Processing Engine</span>
+                      </div>
+                      <p className={`text-[10px] truncate leading-tight ${activeStep === 2 ? 'text-white/80' : 'text-muted-foreground'}`}>
+                        {isCompleted
+                          ? 'Processing finished'
+                          : isRunning
+                          ? 'Active detection & ReID'
+                          : activeSessionId
+                          ? 'Pipeline progress'
+                          : 'Pending upload'}
+                      </p>
+                    </div>
+                  </div>
+                  {activeStep === 2 ? (
+                    <span className="shrink-0 text-[9px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold ml-1">
+                      Active
+                    </span>
+                  ) : isCompleted ? (
+                    <span className="shrink-0 text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.2 rounded-full font-bold border border-emerald-500/20 ml-1">
+                      Finished
+                    </span>
+                  ) : isRunning ? (
+                    <span className="shrink-0 text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.2 rounded-full font-bold animate-pulse border border-amber-500/30 ml-1">
+                      Running
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })()}
+
+            {/* Stage 3: Dashboard Stream (Results) */}
+            <button
+              type="button"
+              onClick={() => (sessionData?.status || '').toUpperCase() === 'COMPLETED' && setActiveStep(3)}
+              disabled={(sessionData?.status || '').toUpperCase() !== 'COMPLETED'}
+              className={`flex items-center justify-between px-3.5 py-2 rounded-lg transition-all text-left border ${
+                (sessionData?.status || '').toUpperCase() !== 'COMPLETED'
+                  ? 'opacity-40 cursor-not-allowed border-border/40 bg-card/20'
+                  : activeStep === 3
+                  ? 'bg-primary text-primary-foreground shadow-sm border-primary font-bold cursor-pointer'
+                  : 'bg-card/40 border-border/60 hover:bg-accent/60 text-foreground hover:border-border cursor-pointer'
+              }`}
+            >
+              <div className="flex items-center gap-2.5 min-w-0">
+                <div
+                  className={`flex h-7 w-7 items-center justify-center rounded-lg shrink-0 ${
+                    activeStep === 3
+                      ? 'bg-white/20 text-white'
+                      : (sessionData?.status || '').toUpperCase() === 'COMPLETED'
+                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                      : 'bg-accent text-muted-foreground border border-border'
+                  }`}
+                >
+                  <Activity className="h-3.5 w-3.5" />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-[9px] font-extrabold uppercase tracking-wider opacity-80">
+                      Step 3
+                    </span>
+                    <span className="text-xs font-bold truncate">Dashboard Stream</span>
+                  </div>
+                  <p className={`text-[10px] truncate leading-tight ${activeStep === 3 ? 'text-white/80' : 'text-muted-foreground'}`}>
+                    {(sessionData?.status || '').toUpperCase() === 'COMPLETED'
+                      ? 'Results & journeys'
+                      : 'Awaiting completion'}
+                  </p>
+                </div>
+              </div>
+              {activeStep === 3 ? (
+                <span className="shrink-0 text-[9px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold ml-1">
+                  Active
+                </span>
+              ) : (sessionData?.status || '').toUpperCase() === 'COMPLETED' ? (
+                <span className="shrink-0 text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 rounded-full font-bold border border-emerald-500/30 ml-1">
+                  Ready
+                </span>
+              ) : null}
+            </button>
           </div>
 
           {/* SUB-TAB 1: TOPOLOGY GRAPH, CAMERA LIST & VIDEO UPLOAD */}
@@ -1362,293 +1479,190 @@ function VigilensAPAMainContent() {
                       )}
                     </h3>
 
-                    <div
-                      onDragOver={(e) => {
-                        e.preventDefault();
-                        setIsDragOver(true);
-                      }}
-                      onDragLeave={() => setIsDragOver(false)}
-                      onDrop={handleDrop}
-                      className={`relative flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-all ${
-                        isDragOver
-                          ? 'border-primary bg-primary/5 scale-[0.99]'
-                          : selectedFile || selectedUploadedVideo
-                          ? 'border-emerald-500/50 bg-accent/20'
-                          : 'border-border bg-accent/10 hover:border-primary/50'
-                      }`}
-                    >
-                      {videoPreviewUrl ? (
-                        <div className="w-full flex flex-col items-center gap-3">
-                          {/* Live Video Thumbnail / Preview Player */}
-                          <div className="relative w-full max-w-md aspect-video rounded-xl overflow-hidden border border-border/80 bg-black shadow-lg">
-                            <video
-                              ref={previewVideoRef}
-                              src={videoPreviewUrl}
-                              controls
-                              playsInline
-                              preload="metadata"
-                              className="w-full h-full object-contain"
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-stretch">
+                      {/* Left Column: Video Preview Player or Dropzone Upload */}
+                      <div className="md:col-span-7 flex flex-col">
+                        {videoPreviewUrl ? (
+                          <div className="flex-1 flex flex-col items-center justify-between rounded-xl border border-emerald-500/40 bg-accent/15 p-3.5 text-center shadow-sm">
+                            {/* Live Video Thumbnail / Preview Player */}
+                            <div className="relative w-full aspect-video rounded-xl overflow-hidden border border-border/80 bg-black shadow-md">
+                              <video
+                                ref={previewVideoRef}
+                                src={videoPreviewUrl}
+                                controls
+                                playsInline
+                                preload="metadata"
+                                className="w-full h-full object-contain"
+                              />
+                              <div className="absolute top-2 left-2 rounded-md bg-black/75 px-2 py-0.5 text-[10px] text-white font-medium flex items-center gap-1 backdrop-blur-sm pointer-events-none">
+                                <Play className="h-3 w-3 text-emerald-400 fill-emerald-400" /> Video Preview
+                              </div>
+                            </div>
+
+                            {/* Details & Actions Bar */}
+                            <div className="mt-2.5 flex flex-wrap items-center justify-between w-full gap-2 px-1">
+                              <div className="flex items-center gap-1.5 text-left min-w-0 flex-1">
+                                <FileVideo className="h-4 w-4 text-emerald-400 shrink-0" />
+                                <span
+                                  className="text-xs font-bold text-foreground truncate"
+                                  title={
+                                    selectedUploadedVideo
+                                      ? (selectedUploadedVideo.original_filename || (selectedUploadedVideo as any).filename)
+                                      : selectedFile?.name
+                                  }
+                                >
+                                  {selectedUploadedVideo
+                                    ? (selectedUploadedVideo.original_filename || (selectedUploadedVideo as any).filename)
+                                    : selectedFile?.name}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground shrink-0 font-mono">
+                                  (
+                                  {selectedUploadedVideo && selectedUploadedVideo.file_size
+                                    ? `${(selectedUploadedVideo.file_size / (1024 * 1024)).toFixed(2)} MB`
+                                    : selectedFile
+                                    ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`
+                                    : 'Ready'}
+                                  )
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <label className="cursor-pointer rounded-lg border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm">
+                                  Change
+                                  <input
+                                    type="file"
+                                    accept="video/*"
+                                    onChange={handleFileInputChange}
+                                    className="hidden"
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setSelectedFile(null);
+                                    setSelectedUploadedVideo(null);
+                                    setVideoPreviewUrl('');
+                                  }}
+                                  className="rounded-lg border border-destructive/30 bg-destructive/10 px-2.5 py-1 text-xs font-semibold text-destructive hover:bg-destructive/20 transition-colors cursor-pointer"
+                                >
+                                  Remove
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          <div
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              setIsDragOver(true);
+                            }}
+                            onDragLeave={() => setIsDragOver(false)}
+                            onDrop={handleDrop}
+                            className={`relative flex-1 flex flex-col items-center justify-center rounded-xl border-2 border-dashed p-6 text-center transition-all min-h-[240px] ${
+                              isDragOver
+                                ? 'border-primary bg-primary/5 scale-[0.99]'
+                                : 'border-border bg-accent/10 hover:border-primary/50'
+                            }`}
+                          >
+                            <input
+                              type="file"
+                              accept="video/*"
+                              onChange={handleFileInputChange}
+                              className="absolute inset-0 cursor-pointer opacity-0"
                             />
-                            <div className="absolute top-2 left-2 rounded-md bg-black/75 px-2 py-0.5 text-[10px] text-white font-medium flex items-center gap-1 backdrop-blur-sm pointer-events-none">
-                              <Play className="h-3 w-3 text-emerald-400 fill-emerald-400" /> Video Preview
-                            </div>
-                          </div>
-
-                          <div className="flex flex-wrap items-center justify-center gap-2">
-                            <FileVideo className="h-4 w-4 text-emerald-400" />
-                            <span className="text-xs font-bold text-foreground">
-                              {selectedUploadedVideo
-                                ? (selectedUploadedVideo.original_filename || (selectedUploadedVideo as any).filename)
-                                : selectedFile?.name}
-                            </span>
-                            <span className="text-[11px] text-muted-foreground">
-                              (
-                              {selectedUploadedVideo && selectedUploadedVideo.file_size
-                                ? `${(selectedUploadedVideo.file_size / (1024 * 1024)).toFixed(2)} MB`
-                                : selectedFile
-                                ? `${(selectedFile.size / (1024 * 1024)).toFixed(2)} MB`
-                                : 'Ready'}
-                              )
-                            </span>
-                          </div>
-
-                          <div className="relative z-10 flex items-center gap-2 mt-1">
-                            <label className="cursor-pointer rounded-lg border border-border bg-card px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent transition-colors shadow-sm">
-                              Change Video
-                              <input
-                                type="file"
-                                accept="video/*"
-                                onChange={handleFileInputChange}
-                                className="hidden"
-                              />
-                            </label>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setSelectedFile(null);
-                                setSelectedUploadedVideo(null);
-                                setVideoPreviewUrl('');
-                              }}
-                              className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-1.5 text-xs font-semibold text-destructive hover:bg-destructive/20 transition-colors cursor-pointer"
-                            >
-                              Remove
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <>
-                          <input
-                            type="file"
-                            accept="video/*"
-                            onChange={handleFileInputChange}
-                            className="absolute inset-0 cursor-pointer opacity-0"
-                          />
-                          <FileVideo className="h-10 w-10 mb-2 text-primary" />
-                          <p className="text-sm font-semibold text-foreground">
-                            Click to Browse or Drag & Drop CCTV Video
-                          </p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            MP4, AVI, MOV supported for YOLOv8 segmentation and ReID embedding
-                          </p>
-                        </>
-                      )}
-                    </div>
-
-                    {/* Previously Uploaded Footage Selection (Recent Uploads) */}
-                    {uploadedVideos.length > 0 && (
-                      <div className="mt-4 border-t border-border pt-3">
-                        <p className="mb-2 text-xs font-medium text-muted-foreground">
-                          Or select from recent uploads:
-                        </p>
-                        <div className="flex flex-wrap gap-2 max-h-28 overflow-y-auto">
-                          {uploadedVideos.map((vid, idx) => {
-                            const isSelected = selectedUploadedVideo?.id === vid.id;
-                            const displayName = vid.original_filename || (vid as any).filename || 'Video Footage';
-                            return (
-                              <button
-                                key={`${vid.id}-${idx}`}
-                                type="button"
-                                onClick={() => handleSelectUploadedVideo(vid)}
-                                className={`flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-all cursor-pointer ${
-                                  isSelected
-                                    ? 'border-primary bg-primary/10 text-primary font-semibold ring-1 ring-primary'
-                                    : 'border-border bg-accent/30 text-muted-foreground hover:border-primary/50 hover:text-foreground'
-                                }`}
-                              >
-                                <span>🎬</span>
-                                <span>{displayName}</span>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Time Range / Sub-Clip Slicing Component */}
-                    {(selectedFile || selectedUploadedVideo) && (
-                      <div className="mt-4 rounded-xl border border-border bg-accent/10 p-4 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Timer className="h-4 w-4 text-primary" />
-                            <span className="text-xs font-bold text-foreground">Video Time-Range / Sub-Clip</span>
-                            <span className="text-[10px] bg-primary/10 text-primary font-semibold px-2 py-0.5 rounded-full">
-                              Optional
-                            </span>
-                          </div>
-
-                          <div className="flex items-center gap-2">
-                            <span className="text-[11px] text-muted-foreground font-medium">
-                              {enableTimeRange ? 'Custom Range (Active)' : 'Entire Footage'}
-                            </span>
-                            <button
-                              type="button"
-                              onClick={() => setEnableTimeRange(!enableTimeRange)}
-                              className={`w-9 h-5 flex items-center rounded-full p-0.5 transition-colors cursor-pointer ${
-                                enableTimeRange ? 'bg-primary' : 'bg-muted-foreground/30'
-                              }`}
-                            >
-                              <div
-                                className={`bg-white w-4 h-4 rounded-full shadow-md transform transition-transform ${
-                                  enableTimeRange ? 'translate-x-4' : 'translate-x-0'
-                                }`}
-                              />
-                            </button>
-                          </div>
-                        </div>
-
-                        {enableTimeRange && (
-                          <div className="pt-2 border-t border-border/60 space-y-3 animate-in fade-in duration-200">
-                            <p className="text-[11px] text-muted-foreground">
-                              Process a specific segment of the video (e.g. only 01:00 to 03:30) to speed up analysis and reduce compute:
+                            <FileVideo className="h-10 w-10 mb-2 text-primary" />
+                            <p className="text-sm font-semibold text-foreground">
+                              Click to Browse or Drag & Drop CCTV Video
                             </p>
-
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                              {/* Start Time Input */}
-                              <div className="rounded-lg border border-border bg-card p-2.5 space-y-1.5">
-                                <div className="flex items-center justify-between">
-                                  <label className="text-[11px] font-semibold text-foreground flex items-center gap-1">
-                                    <span>⏱️ Start Time</span>
-                                    <span className="text-[10px] text-muted-foreground font-mono">(MM:SS or Sec)</span>
-                                  </label>
-                                  {videoPreviewUrl && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (previewVideoRef.current) {
-                                          const cur = Math.floor(previewVideoRef.current.currentTime);
-                                          setStartTimeSec(cur);
-                                          toast.success(`Start time set to ${formatSecondsToTime(cur)}`);
-                                        }
-                                      }}
-                                      className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
-                                      title="Capture current timestamp from preview video"
-                                    >
-                                      <Play className="h-2.5 w-2.5 fill-current" /> Use Current Time
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    placeholder="00:00"
-                                    value={startTimeSec !== null ? formatSecondsToTime(startTimeSec) : ''}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      if (!val) {
-                                        setStartTimeSec(null);
-                                      } else {
-                                        const secs = parseTimeToSeconds(val);
-                                        setStartTimeSec(secs);
-                                      }
-                                    }}
-                                    className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                                  />
-                                  {startTimeSec !== null && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setStartTimeSec(null)}
-                                      className="text-muted-foreground hover:text-foreground text-xs p-1"
-                                      title="Clear start time"
-                                    >
-                                      <X className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-
-                              {/* End Time Input */}
-                              <div className="rounded-lg border border-border bg-card p-2.5 space-y-1.5">
-                                <div className="flex items-center justify-between">
-                                  <label className="text-[11px] font-semibold text-foreground flex items-center gap-1">
-                                    <span>⏱️ End Time</span>
-                                    <span className="text-[10px] text-muted-foreground font-mono">(MM:SS or Sec)</span>
-                                  </label>
-                                  {videoPreviewUrl && (
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        if (previewVideoRef.current) {
-                                          const cur = Math.ceil(previewVideoRef.current.currentTime);
-                                          setEndTimeSec(cur);
-                                          toast.success(`End time set to ${formatSecondsToTime(cur)}`);
-                                        }
-                                      }}
-                                      className="text-[10px] font-semibold text-primary hover:underline flex items-center gap-0.5 cursor-pointer"
-                                      title="Capture current timestamp from preview video"
-                                    >
-                                      <Play className="h-2.5 w-2.5 fill-current" /> Use Current Time
-                                    </button>
-                                  )}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    placeholder="05:00"
-                                    value={endTimeSec !== null ? formatSecondsToTime(endTimeSec) : ''}
-                                    onChange={(e) => {
-                                      const val = e.target.value;
-                                      if (!val) {
-                                        setEndTimeSec(null);
-                                      } else {
-                                        const secs = parseTimeToSeconds(val);
-                                        setEndTimeSec(secs);
-                                      }
-                                    }}
-                                    className="w-full rounded-md border border-input bg-background px-2.5 py-1.5 text-xs font-mono font-bold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                                  />
-                                  {endTimeSec !== null && (
-                                    <button
-                                      type="button"
-                                      onClick={() => setEndTimeSec(null)}
-                                      className="text-muted-foreground hover:text-foreground text-xs p-1"
-                                      title="Clear end time"
-                                    >
-                                      <X className="h-3.5 w-3.5" />
-                                    </button>
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Dynamic Duration / Range Badge */}
-                            {(startTimeSec !== null || endTimeSec !== null) && (
-                              <div className="flex items-center justify-between bg-primary/10 border border-primary/20 rounded-lg px-3 py-1.5 text-xs">
-                                <div className="flex items-center gap-1.5 font-medium text-foreground">
-                                  <span className="text-primary font-bold">🎯 Sub-Clip:</span>
-                                  <span className="font-mono">{formatSecondsToTime(startTimeSec || 0)}</span>
-                                  <span>➔</span>
-                                  <span className="font-mono">{endTimeSec !== null ? formatSecondsToTime(endTimeSec) : 'End of video'}</span>
-                                </div>
-                                {endTimeSec !== null && startTimeSec !== null && endTimeSec > startTimeSec && (
-                                  <span className="font-semibold text-primary font-mono">
-                                    Duration: {endTimeSec - startTimeSec}s ({Math.floor((endTimeSec - startTimeSec) / 60)}m {(endTimeSec - startTimeSec) % 60}s)
-                                  </span>
-                                )}
-                              </div>
-                            )}
+                            <p className="text-xs text-muted-foreground mt-1">
+                              MP4, AVI, MOV supported for YOLOv8 segmentation and ReID embedding
+                            </p>
                           </div>
                         )}
                       </div>
+
+                      {/* Right Column: Scrollable List of Recent Upload Suggestions */}
+                      <div className="md:col-span-5 flex flex-col rounded-xl border border-border bg-accent/20 p-3 min-h-[240px]">
+                        <div className="flex items-center justify-between pb-2 mb-2 border-b border-border/60">
+                          <span className="text-xs font-bold text-foreground flex items-center gap-1.5">
+                            <Film className="h-3.5 w-3.5 text-primary" /> Select From Recent Footage
+                          </span>
+                          <span className="text-[10px] font-bold text-muted-foreground bg-accent/80 px-2 py-0.5 rounded-full border border-border/60">
+                            {uploadedVideos.length} Available
+                          </span>
+                        </div>
+
+                        {uploadedVideos.length > 0 ? (
+                          <div className="flex-1 overflow-y-auto space-y-1.5 max-h-[240px] pr-1">
+                            {uploadedVideos.map((vid, idx) => {
+                              const isSelected = selectedUploadedVideo?.id === vid.id;
+                              const displayName = vid.original_filename || (vid as any).filename || 'Video Footage';
+                              const sizeMb = vid.file_size ? (vid.file_size / (1024 * 1024)).toFixed(1) + ' MB' : null;
+                              return (
+                                <button
+                                  key={`${vid.id}-${idx}`}
+                                  type="button"
+                                  onClick={() => handleSelectUploadedVideo(vid)}
+                                  className={`w-full flex items-center justify-between gap-2 rounded-lg border p-2 text-left transition-all cursor-pointer group ${
+                                    isSelected
+                                      ? 'border-primary bg-primary/15 text-primary font-semibold ring-1 ring-primary shadow-sm'
+                                      : 'border-border/70 bg-card hover:bg-accent/60 hover:border-primary/40 text-foreground'
+                                  }`}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 flex-1">
+                                    <div
+                                      className={`p-1.5 rounded-md shrink-0 transition-colors ${
+                                        isSelected
+                                          ? 'bg-primary/20 text-primary'
+                                          : 'bg-accent text-muted-foreground group-hover:text-foreground'
+                                      }`}
+                                    >
+                                      <Play className={`h-3 w-3 ${isSelected ? 'fill-primary' : ''}`} />
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <p className="text-xs font-medium truncate leading-tight" title={displayName}>
+                                        {displayName}
+                                      </p>
+                                      {sizeMb && (
+                                        <span className="text-[10px] text-muted-foreground font-mono">
+                                          {sizeMb}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                  {isSelected && (
+                                    <span className="shrink-0 flex items-center gap-0.5 text-[9px] font-bold text-emerald-400 bg-emerald-500/10 px-1.5 py-0.5 rounded border border-emerald-500/20">
+                                      <Check className="h-2.5 w-2.5" /> Selected
+                                    </span>
+                                  )}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="flex-1 flex flex-col items-center justify-center text-center p-4 text-muted-foreground text-xs">
+                            <FileVideo className="h-6 w-6 mb-1 opacity-40" />
+                            <p className="font-semibold">No recent uploads yet</p>
+                            <p className="text-[10px] opacity-70 mt-0.5">Uploaded videos will appear here for instant 1-click preview.</p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Interactive Video Timeline / Sub-Clip Trimmer */}
+                    {(selectedFile || selectedUploadedVideo) && (
+                      <VideoTimeRangeTrimmer
+                        videoRef={previewVideoRef}
+                        videoPreviewUrl={videoPreviewUrl}
+                        enableTimeRange={enableTimeRange}
+                        setEnableTimeRange={setEnableTimeRange}
+                        startTimeSec={startTimeSec}
+                        setStartTimeSec={setStartTimeSec}
+                        endTimeSec={endTimeSec}
+                        setEndTimeSec={setEndTimeSec}
+                        formatSecondsToTime={formatSecondsToTime}
+                        parseTimeToSeconds={parseTimeToSeconds}
+                      />
                     )}
 
                     {/* Camera Node Assignment Selector */}
@@ -2111,8 +2125,21 @@ function VigilensAPAMainContent() {
                     </p>
                   </div>
                   <div className="flex items-center gap-2 shrink-0 flex-wrap">
-                    {/* View Mode Switcher */}
+                    {/* View Mode Switcher: Split (Default), Cards (Grid), Table (List) */}
                     <div className="flex items-center bg-accent/40 p-0.5 rounded-lg border border-border">
+                      <button
+                        type="button"
+                        onClick={() => setDetectedViewMode('split')}
+                        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
+                          detectedViewMode === 'split'
+                            ? 'bg-primary text-primary-foreground shadow-sm'
+                            : 'text-muted-foreground hover:text-foreground'
+                        }`}
+                        title="List with Card beside it"
+                      >
+                        <Columns className="h-3.5 w-3.5" />
+                        <span className="hidden sm:inline">List & Card</span>
+                      </button>
                       <button
                         type="button"
                         onClick={() => setDetectedViewMode('grid')}
@@ -2121,23 +2148,23 @@ function VigilensAPAMainContent() {
                             ? 'bg-primary text-primary-foreground shadow-sm'
                             : 'text-muted-foreground hover:text-foreground'
                         }`}
-                        title="Cards View"
+                        title="Cards Grid View"
                       >
                         <LayoutGrid className="h-3.5 w-3.5" />
                         <span className="hidden sm:inline">Cards</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => setDetectedViewMode('list')}
+                        onClick={() => setDetectedViewMode('table')}
                         className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold transition-all cursor-pointer ${
-                          detectedViewMode === 'list'
+                          detectedViewMode === 'table'
                             ? 'bg-primary text-primary-foreground shadow-sm'
                             : 'text-muted-foreground hover:text-foreground'
                         }`}
-                        title="List View"
+                        title="Full Table View"
                       >
                         <List className="h-3.5 w-3.5" />
-                        <span className="hidden sm:inline">List</span>
+                        <span className="hidden sm:inline">Table</span>
                       </button>
                     </div>
 
@@ -2148,7 +2175,274 @@ function VigilensAPAMainContent() {
                 </div>
 
                 {detectedPeople.length > 0 ? (
-                  detectedViewMode === 'grid' ? (
+                  detectedViewMode === 'split' ? (
+                    /* SPLIT VIEW (DEFAULT): LIST ON LEFT + INSPECTOR CARD BESIDE IT ON RIGHT */
+                    (() => {
+                      const activePerson = detectedPeople[selectedPersonIndex] || detectedPeople[0] || null;
+                      const activeFirstSeen = activePerson ? (activePerson.first_seen_sec ?? activePerson.first_seen ?? 0) : 0;
+                      const activeLastSeen = activePerson ? (activePerson.last_seen_sec ?? activePerson.last_seen ?? (activeFirstSeen + 1)) : 1;
+                      const activeDwell = activePerson ? (activePerson.duration_seconds ?? Math.max(1, Math.round(activeLastSeen - activeFirstSeen))) : 0;
+                      const activePersonId = activePerson ? (activePerson.identity_id || activePerson.employee_id) : null;
+                      const activeAppearances = activePerson ? (activePerson.appearances_count ?? (activePerson.segments?.length || 1)) : 1;
+
+                      const isAnnotatedTrimmed = Boolean(sessionData?.output_video_path && (sessionData?.start_time_sec ?? 0) > 0);
+                      const effectiveVideoTime = isAnnotatedTrimmed
+                        ? playbackCurrentTime + (sessionData?.start_time_sec || 0)
+                        : playbackCurrentTime;
+
+                      const activeIsInFrame = activePerson
+                        ? (activePerson.segments && activePerson.segments.length > 0
+                          ? activePerson.segments.some((seg) => effectiveVideoTime >= (seg.first_seen_sec - 0.25) && effectiveVideoTime <= (seg.last_seen_sec + 0.25))
+                          : effectiveVideoTime >= (activeFirstSeen - 0.25) && effectiveVideoTime <= (activeLastSeen + 0.25))
+                        : false;
+
+                      return (
+                        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+                          {/* Left Column: Scrollable List of Detected Individuals (7 cols) */}
+                          <div className="lg:col-span-7 flex flex-col space-y-2 max-h-[580px] overflow-y-auto pr-1">
+                            {detectedPeople.map((p, idx) => {
+                              const firstSeen = p.first_seen_sec ?? p.first_seen ?? 0;
+                              const lastSeen = p.last_seen_sec ?? p.last_seen ?? (firstSeen + 1);
+                              const isInFrame = p.segments && p.segments.length > 0
+                                ? p.segments.some((seg) => effectiveVideoTime >= (seg.first_seen_sec - 0.25) && effectiveVideoTime <= (seg.last_seen_sec + 0.25))
+                                : effectiveVideoTime >= (firstSeen - 0.25) && effectiveVideoTime <= (lastSeen + 0.25);
+                              const dwellSec = p.duration_seconds ?? Math.max(1, Math.round(lastSeen - firstSeen));
+                              const seqNum = p.sequence_number ?? (idx + 1);
+                              const isSelected = selectedPersonIndex === idx;
+                              const appearances = p.appearances_count ?? (p.segments?.length || 1);
+
+                              return (
+                                <div
+                                  key={idx}
+                                  onClick={() => {
+                                    setSelectedPersonIndex(idx);
+                                    handleSeekVideoToTime(firstSeen);
+                                  }}
+                                  className={`group flex items-center justify-between gap-3 rounded-xl border p-3 transition-all cursor-pointer select-none ${
+                                    isSelected
+                                      ? 'border-primary bg-primary/15 ring-2 ring-primary/40 shadow-md'
+                                      : isInFrame
+                                      ? 'border-emerald-500/60 bg-emerald-500/10 hover:bg-emerald-500/15'
+                                      : 'border-border/80 bg-accent/20 hover:border-primary/50 hover:bg-accent/40'
+                                  }`}
+                                >
+                                  {/* Left: Sequence + Avatar + Name + Role + Timestamps */}
+                                  <div className="flex items-center gap-3 min-w-0 flex-1">
+                                    <span className="font-mono text-xs font-bold text-muted-foreground w-6 text-center shrink-0">
+                                      #{seqNum}
+                                    </span>
+                                    <div className="relative h-11 w-11 overflow-hidden rounded-lg bg-background border border-border shrink-0">
+                                      {p.crop_url ? (
+                                        <img
+                                          src={getMediaCropUrl(p.crop_url)}
+                                          alt={p.name}
+                                          className="h-full w-full object-cover"
+                                        />
+                                      ) : (
+                                        <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                          <User className="h-5 w-5 opacity-60" />
+                                        </div>
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-2 flex-wrap">
+                                        <span className="font-bold text-xs text-foreground truncate" title={p.name}>
+                                          {p.name}
+                                        </span>
+                                        <span
+                                          className={`text-[9px] font-bold px-1.5 py-0.2 rounded-full uppercase ${
+                                            p.person_type === 'employee'
+                                              ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                              : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                          }`}
+                                        >
+                                          {p.person_type === 'employee' ? '👔 Employee' : '👤 Visitor'}
+                                        </span>
+                                        {appearances > 1 && (
+                                          <span className="text-[9px] font-bold px-1.5 py-0.2 rounded-md bg-primary/20 text-primary border border-primary/30">
+                                            🔁 {appearances}x
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-3 mt-1 text-[11px] text-muted-foreground font-mono">
+                                        <span className="flex items-center gap-1 text-primary font-semibold">
+                                          <Clock className="h-3 w-3" />
+                                          {p.formatted_time || `${formatSecondsToTime(firstSeen)} - ${formatSecondsToTime(lastSeen)}`}
+                                        </span>
+                                        <span className="bg-background/80 px-1.5 py-0.2 rounded text-[10px] text-foreground font-medium border border-border/50">
+                                          ⏱️ {dwellSec}s
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+
+                                  {/* Right: In-Frame Live Pulse & Seek Trigger */}
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    {isInFrame && (
+                                      <span className="flex items-center gap-1 text-[9px] font-bold px-2 py-0.5 rounded-full bg-emerald-500 text-white animate-pulse shadow-sm">
+                                        IN FRAME
+                                      </span>
+                                    )}
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        setSelectedPersonIndex(idx);
+                                        handleSeekVideoToTime(firstSeen);
+                                      }}
+                                      className="p-1.5 rounded-lg bg-primary/10 hover:bg-primary text-primary hover:text-primary-foreground border border-primary/20 transition-colors cursor-pointer"
+                                      title="Seek video to appearance"
+                                    >
+                                      <Play className="h-3.5 w-3.5 fill-current" />
+                                    </button>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Right Column: Prominent Inspector Card Beside List (5 cols) */}
+                          <div className="lg:col-span-5 sticky top-20">
+                            {activePerson ? (
+                              <div className="flex flex-col rounded-2xl border border-primary/30 bg-card p-5 space-y-4 shadow-xl shadow-primary/5">
+                                {/* Card Header */}
+                                <div className="flex items-center justify-between gap-2 border-b border-border/60 pb-3">
+                                  <div className="flex items-center gap-2">
+                                    <span className="font-mono text-xs font-bold px-2 py-0.5 rounded-md bg-accent border border-border text-foreground">
+                                      #{activePerson.sequence_number ?? (selectedPersonIndex + 1)}
+                                    </span>
+                                    <span
+                                      className={`text-[10px] font-bold px-2.5 py-0.5 rounded-full uppercase ${
+                                        activePerson.person_type === 'employee'
+                                          ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                          : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                                      }`}
+                                    >
+                                      {activePerson.person_type === 'employee' ? '👔 Registered Staff' : '👤 Unregistered Visitor'}
+                                    </span>
+                                  </div>
+
+                                  {activeIsInFrame && (
+                                    <span className="flex items-center gap-1 text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500 text-white animate-pulse shadow-sm">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-white animate-ping" /> IN FRAME NOW
+                                    </span>
+                                  )}
+                                </div>
+
+                                {/* Photo Crop Preview */}
+                                <div
+                                  className="relative h-48 w-full overflow-hidden rounded-xl bg-black border border-border group cursor-pointer"
+                                  onClick={() => handleSeekVideoToTime(activeFirstSeen)}
+                                >
+                                  {activePerson.crop_url ? (
+                                    <img
+                                      src={getMediaCropUrl(activePerson.crop_url)}
+                                      alt={activePerson.name}
+                                      className="h-full w-full object-cover transition-transform group-hover:scale-105"
+                                    />
+                                  ) : (
+                                    <div className="flex h-full w-full items-center justify-center text-muted-foreground">
+                                      <User className="h-14 w-14 opacity-60" />
+                                    </div>
+                                  )}
+                                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center backdrop-blur-[2px]">
+                                    <span className="flex items-center gap-1.5 text-xs font-bold text-white bg-primary px-3.5 py-2 rounded-xl shadow-lg">
+                                      <Play className="h-3.5 w-3.5 fill-white" /> Jump to {formatSecondsToTime(activeFirstSeen)}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                {/* Identity & Stats */}
+                                <div className="space-y-3">
+                                  <div>
+                                    <h4 className="text-base font-bold text-foreground truncate">{activePerson.name}</h4>
+                                    <p className="text-[11px] text-muted-foreground font-mono mt-0.5">
+                                      ID: {activePerson.identity_id || activePerson.employee_id || 'Visitor Track'}
+                                    </p>
+                                  </div>
+
+                                  <div className="grid grid-cols-2 gap-2 text-xs">
+                                    <div className="rounded-xl bg-accent/30 border border-border/60 p-2.5 space-y-0.5">
+                                      <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1">
+                                        <Clock className="h-3 w-3 text-primary" /> Appearance Time
+                                      </span>
+                                      <span className="font-mono font-bold text-foreground block text-xs">
+                                        {formatSecondsToTime(activeFirstSeen)} - {formatSecondsToTime(activeLastSeen)}
+                                      </span>
+                                    </div>
+
+                                    <div className="rounded-xl bg-accent/30 border border-border/60 p-2.5 space-y-0.5">
+                                      <span className="text-[10px] uppercase font-bold text-muted-foreground flex items-center gap-1">
+                                        <Timer className="h-3 w-3 text-emerald-400" /> Dwell Duration
+                                      </span>
+                                      <span className="font-mono font-bold text-emerald-400 block text-xs">
+                                        {activeDwell}s {activeAppearances > 1 ? `(${activeAppearances}x visits)` : ''}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  {/* Multiple Moments / Re-entry Seek Chips */}
+                                  {activePerson.segments && activePerson.segments.length > 1 && (
+                                    <div className="space-y-1.5 pt-1">
+                                      <span className="text-[10px] font-bold text-muted-foreground uppercase flex items-center gap-1">
+                                        <Footprints className="h-3 w-3 text-primary" /> Detected Moments ({activePerson.segments.length})
+                                      </span>
+                                      <div className="flex flex-wrap gap-1.5">
+                                        {activePerson.segments.map((seg, sIdx) => (
+                                          <button
+                                            key={sIdx}
+                                            type="button"
+                                            onClick={() => handleSeekVideoToTime(seg.first_seen_sec)}
+                                            className="flex items-center gap-1 px-2 py-1 rounded-lg text-[10px] font-mono font-bold bg-accent hover:bg-primary hover:text-primary-foreground border border-border transition-colors cursor-pointer"
+                                          >
+                                            <Play className="h-2.5 w-2.5 fill-current" />
+                                            {formatSecondsToTime(seg.first_seen_sec)} ({seg.duration_seconds}s)
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Zone / Location */}
+                                  {(activePerson.zone_name || activePerson.camera_name) && (
+                                    <div className="rounded-xl bg-accent/20 border border-border/40 px-3 py-2 text-xs flex items-center gap-2 text-muted-foreground">
+                                      <MapPin className="h-3.5 w-3.5 text-primary shrink-0" />
+                                      <span>Location: <b className="text-foreground">{activePerson.zone_name || activePerson.camera_name}</b></span>
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Action Buttons */}
+                                <div className="flex items-center gap-2 pt-2 border-t border-border/60">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleSeekVideoToTime(activeFirstSeen)}
+                                    className="flex-1 flex items-center justify-center gap-1.5 rounded-xl bg-primary py-2 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-sm transition-all cursor-pointer"
+                                  >
+                                    <Play className="h-3.5 w-3.5 fill-current" /> Seek Video
+                                  </button>
+
+                                  {activePersonId && (
+                                    <Link
+                                      href={`/people/${activePersonId}?type=${activePerson.person_type}`}
+                                      className="flex items-center justify-center gap-1.5 rounded-xl border border-border bg-card hover:bg-accent px-3.5 py-2 text-xs font-bold text-foreground transition-all cursor-pointer shadow-xs"
+                                    >
+                                      <Footprints className="h-3.5 w-3.5 text-primary" /> Journey
+                                    </Link>
+                                  )}
+                                </div>
+                              </div>
+                            ) : (
+                              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-border p-8 text-center text-muted-foreground space-y-2">
+                                <User className="h-10 w-10 opacity-40" />
+                                <p className="text-xs">Select a person from the list to preview details</p>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()
+                  ) : detectedViewMode === 'grid' ? (
                     /* GRID / CARD VIEW */
                     <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
                       {detectedPeople.map((p, idx) => {
@@ -2308,7 +2602,7 @@ function VigilensAPAMainContent() {
                       })}
                     </div>
                   ) : (
-                    /* LIST / ROW VIEW */
+                    /* FULL TABLE VIEW */
                     <div className="overflow-x-auto rounded-xl border border-border bg-card/40">
                       <table className="w-full text-left text-xs border-collapse">
                         <thead>
@@ -2865,102 +3159,138 @@ function VigilensAPAMainContent() {
               <RefreshCw className="h-8 w-8 animate-spin text-primary" />
             </div>
           ) : pastSessions.length > 0 ? (
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 gap-5">
               {pastSessions.map((s) => (
                 <div
                   key={s.id}
-                  className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3 transition-all hover:border-primary/40"
+                  className="rounded-2xl border border-border bg-card shadow-sm transition-all hover:border-primary/40 overflow-hidden flex flex-col md:flex-row"
                 >
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
-                        <Video className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h3 className="font-bold text-sm text-foreground">{s.video_name}</h3>
-                        <span className="text-[11px] text-muted-foreground flex items-center gap-1">
-                          <Calendar className="h-3 w-3" />
-                          {s.created_at ? new Date(s.created_at).toLocaleString() : 'N/A'}
-                        </span>
+                  {/* Left Side: 32-38% Video Thumbnail / Preview */}
+                  <div 
+                    onClick={() => handleSelectPastSession(s)}
+                    className="w-full md:w-[35%] min-h-[170px] md:min-h-[195px] relative bg-black flex items-center justify-center overflow-hidden group border-b md:border-b-0 md:border-r border-border/60 cursor-pointer shrink-0"
+                  >
+                    <video
+                      src={`${getAnnotatedVideoUrl(s.id)}#t=0.5`}
+                      preload="metadata"
+                      muted
+                      playsInline
+                      className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      onLoadedMetadata={(e) => {
+                        try {
+                          (e.target as HTMLVideoElement).currentTime = 0.5;
+                        } catch {}
+                      }}
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/20 to-black/30 pointer-events-none" />
+                    
+                    {/* Floating Play Button */}
+                    <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
+                      <div className="h-11 w-11 rounded-full bg-primary/90 text-primary-foreground flex items-center justify-center shadow-lg transform transition-transform group-hover:scale-110">
+                        <Play className="h-5 w-5 fill-current ml-0.5" />
                       </div>
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      <span
-                        className={`rounded-lg px-2.5 py-1 text-xs font-bold uppercase ${
-                          (s.status || '').toUpperCase() === 'COMPLETED'
-                            ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                            : (s.status || '').toUpperCase() === 'PROCESSING'
-                            ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
-                            : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
-                        }`}
-                      >
-                        {s.status}
+                    {/* Video Title & Date Overlay on Thumbnail */}
+                    <div className="absolute bottom-2.5 left-3 right-3 pointer-events-none">
+                      <p className="text-xs font-bold text-white truncate drop-shadow-md flex items-center gap-1.5">
+                        <Video className="h-3.5 w-3.5 text-primary shrink-0" />
+                        <span className="truncate">{s.video_name}</span>
+                      </p>
+                      <span className="text-[11px] text-white/80 flex items-center gap-1 drop-shadow-sm mt-0.5">
+                        <Calendar className="h-3 w-3" />
+                        {s.created_at ? new Date(s.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' }) : 'N/A'}
                       </span>
-                      <button
-                        type="button"
-                        onClick={() => handleRerunPastSession(s)}
-                        disabled={rerunningSessionId === s.id || (s.status || '').toUpperCase() === 'PROCESSING'}
-                        className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
-                        title="Rerun video analytics with same parameters"
-                      >
-                        <Play className={`h-3.5 w-3.5 ${rerunningSessionId === s.id ? 'animate-spin' : 'fill-primary'}`} />
-                        {rerunningSessionId === s.id ? 'Rerunning...' : 'Rerun'}
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleSelectPastSession(s)}
-                        className="flex items-center gap-1 rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-sm cursor-pointer"
-                      >
-                        <Eye className="h-3.5 w-3.5" /> View Dashboard
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setSessionToDelete(s)}
-                        className="rounded-xl border border-destructive/30 bg-destructive/10 p-2 text-destructive hover:bg-destructive/20 shadow-sm cursor-pointer"
-                        title="Delete session"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
                     </div>
                   </div>
 
-                  {/* Metrics Grid */}
-                  <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
-                    <div className="rounded-xl bg-accent/20 p-2.5">
-                      <span className="text-muted-foreground block text-[11px] flex items-center gap-1">
-                        <Users className="h-3 w-3 text-primary" /> Total Detections
-                      </span>
-                      <span className="font-bold text-foreground text-sm mt-0.5 block">
-                        {s.total_people_detected ?? 0}
-                      </span>
+                  {/* Right Side: 65% Info, Employees/Visitors Metrics & Actions */}
+                  <div className="w-full md:w-[65%] p-4 sm:p-5 flex flex-col justify-between space-y-4">
+                    {/* Top Row: Title, Status, Actions */}
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border/50 pb-3">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`rounded-lg px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider ${
+                            (s.status || '').toUpperCase() === 'COMPLETED'
+                              ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
+                              : (s.status || '').toUpperCase() === 'PROCESSING'
+                              ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                              : 'bg-rose-500/10 text-rose-400 border border-rose-500/20'
+                          }`}
+                        >
+                          {s.status}
+                        </span>
+                        <span className="text-xs font-semibold text-foreground truncate max-w-[220px]">
+                          {s.video_name}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <button
+                          type="button"
+                          onClick={() => handleRerunPastSession(s)}
+                          disabled={rerunningSessionId === s.id || (s.status || '').toUpperCase() === 'PROCESSING'}
+                          className="flex items-center gap-1.5 rounded-xl border border-primary/30 bg-primary/10 px-3 py-1.5 text-xs font-bold text-primary hover:bg-primary/20 shadow-sm disabled:opacity-50 transition-all cursor-pointer"
+                          title="Rerun video analytics with same parameters"
+                        >
+                          <Play className={`h-3.5 w-3.5 ${rerunningSessionId === s.id ? 'animate-spin' : 'fill-primary'}`} />
+                          {rerunningSessionId === s.id ? 'Rerunning...' : 'Rerun'}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => handleSelectPastSession(s)}
+                          className="flex items-center gap-1 rounded-xl bg-primary px-3 py-1.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 shadow-sm cursor-pointer"
+                        >
+                          <Eye className="h-3.5 w-3.5" /> View Dashboard
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSessionToDelete(s)}
+                          className="rounded-xl border border-destructive/30 bg-destructive/10 p-2 text-destructive hover:bg-destructive/20 shadow-sm cursor-pointer"
+                          title="Delete session"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="rounded-xl bg-accent/20 p-2.5">
-                      <span className="text-muted-foreground block text-[11px] flex items-center gap-1">
-                        <UserCheck className="h-3 w-3 text-emerald-400" /> Employees
-                      </span>
-                      <span className="font-bold text-emerald-400 text-sm mt-0.5 block">
-                        {s.employees_detected_count ?? 0}
-                      </span>
-                    </div>
+                    {/* Metrics Grid: Prominent Employees & Visitors */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                      <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/20 p-3">
+                        <span className="text-emerald-400 font-semibold block text-[11px] flex items-center gap-1">
+                          <UserCheck className="h-3.5 w-3.5 text-emerald-400" /> Employees
+                        </span>
+                        <span className="font-extrabold text-emerald-400 text-lg mt-0.5 block">
+                          {s.employee_count ?? s.employees_detected_count ?? 0}
+                        </span>
+                      </div>
 
-                    <div className="rounded-xl bg-accent/20 p-2.5">
-                      <span className="text-muted-foreground block text-[11px] flex items-center gap-1">
-                        <UserPlus className="h-3 w-3 text-amber-400" /> Visitors
-                      </span>
-                      <span className="font-bold text-amber-400 text-sm mt-0.5 block">
-                        {s.unique_visitors_count ?? 0}
-                      </span>
-                    </div>
+                      <div className="rounded-xl bg-amber-500/10 border border-amber-500/20 p-3">
+                        <span className="text-amber-400 font-semibold block text-[11px] flex items-center gap-1">
+                          <UserPlus className="h-3.5 w-3.5 text-amber-400" /> Visitors
+                        </span>
+                        <span className="font-extrabold text-amber-400 text-lg mt-0.5 block">
+                          {s.visitor_count ?? s.unique_visitors_count ?? 0}
+                        </span>
+                      </div>
 
-                    <div className="rounded-xl bg-accent/20 p-2.5">
-                      <span className="text-muted-foreground block text-[11px] flex items-center gap-1">
-                        <TrendingUp className="h-3 w-3 text-sky-400" /> Gate In / Out
-                      </span>
-                      <span className="font-bold text-foreground text-sm mt-0.5 block">
-                        {s.line_crossings_in_count ?? 0} / {s.line_crossings_out_count ?? 0}
-                      </span>
+                      <div className="rounded-xl bg-accent/20 border border-border/40 p-3">
+                        <span className="text-muted-foreground block text-[11px] flex items-center gap-1">
+                          <Users className="h-3.5 w-3.5 text-primary" /> Total People
+                        </span>
+                        <span className="font-bold text-foreground text-base mt-0.5 block">
+                          {s.total_person_count ?? s.total_people_detected ?? 0}
+                        </span>
+                      </div>
+
+                      <div className="rounded-xl bg-accent/20 border border-border/40 p-3">
+                        <span className="text-muted-foreground block text-[11px] flex items-center gap-1">
+                          <TrendingUp className="h-3.5 w-3.5 text-sky-400" /> Gate In / Out
+                        </span>
+                        <span className="font-bold text-foreground text-base mt-0.5 block">
+                          {s.line_crossings_in_count ?? 0} / {s.line_crossings_out_count ?? 0}
+                        </span>
+                      </div>
                     </div>
                   </div>
                 </div>
