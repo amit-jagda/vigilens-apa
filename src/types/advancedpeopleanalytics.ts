@@ -14,6 +14,48 @@ export interface CameraNode {
   created_at?: string;
 }
 
+export interface SpatialLine {
+  id?: string;
+  floor_plan_id?: string;
+  x1: number;
+  y1: number;
+  x2: number;
+  y2: number;
+  line_type: 'wall' | 'corridor' | 'boundary';
+  label?: string;
+  created_at?: string;
+}
+
+export interface FloorPlan {
+  id: string;
+  tenant_id: string;
+  name: string;
+  image_filepath?: string;
+  canvas_width_px: number;
+  canvas_height_px: number;
+  scale_meters_per_px?: number;
+  created_at?: string;
+  update_at?: string;
+}
+
+export interface CameraNodeLayoutUpdate {
+  id: string;
+  x_coord?: number;
+  y_coord?: number;
+  fov_angle?: number;
+}
+
+export interface SaveLayoutRequest {
+  camera_nodes: CameraNodeLayoutUpdate[];
+  lines: SpatialLine[];
+}
+
+export interface FloorPlanLayoutResponse {
+  floor_plan: FloorPlan;
+  camera_nodes: CameraNode[];
+  lines: SpatialLine[];
+}
+
 export interface CameraNodeLink {
   id: string;
   from_camera_id: string;

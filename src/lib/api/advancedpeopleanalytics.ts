@@ -15,11 +15,18 @@ import type {
   ReconcileIdentityPayload,
   PhotoSearchResponse,
   DailyCheckinRecord,
+  FloorPlan,
+  SpatialLine,
+  SaveLayoutRequest,
+  FloorPlanLayoutResponse,
 } from '@/types/advancedpeopleanalytics';
 
 export const APA_ENDPOINTS = {
   CAMERAS: '/advancedpeopleanalytics/cameras',
   CAMERA_LINKS: '/advancedpeopleanalytics/cameras/links',
+  FLOOR_PLANS: '/advancedpeopleanalytics/floor-plans',
+  FLOOR_PLAN_DETAIL: (id: string) => `/advancedpeopleanalytics/floor-plans/${id}`,
+  SAVE_LAYOUT: (id: string) => `/advancedpeopleanalytics/floor-plans/${id}/save-layout`,
   ZONES: (cameraId: string) => `/advancedpeopleanalytics/cameras/${cameraId}/zones`,
   PROCESS: '/advancedpeopleanalytics/process',
   SESSIONS: '/advancedpeopleanalytics/sessions',
@@ -141,6 +148,60 @@ export async function deleteCameraNodeLink(linkId: string): Promise<ApiResponse<
     return response.data;
   } catch (error) {
     return handleApiError(error, 'Failed to delete camera link');
+  }
+}
+
+// ==========================================
+// FLOOR PLANS & SPATIAL LAYOUT
+// ==========================================
+
+export async function createFloorPlan(data: {
+  name: string;
+  canvas_width_px?: number;
+  canvas_height_px?: number;
+  scale_meters_per_px?: number;
+  image_filepath?: string;
+}): Promise<ApiResponse<FloorPlan>> {
+  try {
+    const response = await apiClient.post<ApiResponse<FloorPlan>>(APA_ENDPOINTS.FLOOR_PLANS, data);
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to create floor plan');
+  }
+}
+
+export async function listFloorPlans(): Promise<ApiResponse<FloorPlan[]>> {
+  try {
+    const response = await apiClient.get<ApiResponse<FloorPlan[]>>(APA_ENDPOINTS.FLOOR_PLANS);
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to fetch floor plans');
+  }
+}
+
+export async function getFloorPlanLayout(floorPlanId: string): Promise<ApiResponse<FloorPlanLayoutResponse>> {
+  try {
+    const response = await apiClient.get<ApiResponse<FloorPlanLayoutResponse>>(
+      APA_ENDPOINTS.FLOOR_PLAN_DETAIL(floorPlanId)
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to fetch floor plan layout');
+  }
+}
+
+export async function saveFloorPlanLayout(
+  floorPlanId: string,
+  data: SaveLayoutRequest
+): Promise<ApiResponse<FloorPlanLayoutResponse>> {
+  try {
+    const response = await apiClient.post<ApiResponse<FloorPlanLayoutResponse>>(
+      APA_ENDPOINTS.SAVE_LAYOUT(floorPlanId),
+      data
+    );
+    return response.data;
+  } catch (error) {
+    return handleApiError(error, 'Failed to save floor plan layout');
   }
 }
 

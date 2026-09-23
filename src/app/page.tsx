@@ -53,6 +53,7 @@ import {
 
 import { LineDrawingCanvas } from '@/components/LineDrawingCanvas';
 import { CameraTopologyGraph } from '@/components/CameraTopologyGraph';
+import { FloorPlanCanvas } from '@/components/setup/FloorPlanCanvas';
 import { DailyCheckinModal } from '@/components/people/DailyCheckinModal';
 import { SearchByPhotoModal } from '@/components/people/SearchByPhotoModal';
 import { ReviewQueueBanner } from '@/components/people/ReviewQueueBanner';
@@ -66,6 +67,10 @@ import {
   createCameraNodeLink,
   listCameraNodeLinks,
   deleteCameraNodeLink,
+  createFloorPlan,
+  listFloorPlans,
+  getFloorPlanLayout,
+  saveFloorPlanLayout,
   processBatchSessions,
   listAnalyticsSessions,
   getSessionDetails,
@@ -91,6 +96,9 @@ import type {
   PersonSummaryItem,
   PersonTimelineResponse,
   TimelineEventItem,
+  FloorPlan,
+  SpatialLine,
+  SaveLayoutRequest,
 } from '@/types/advancedpeopleanalytics';
 import { useApaStore } from '@/stores/apaStore';
 
@@ -198,6 +206,10 @@ function VigilensAPAMainContent() {
   const [newCameraName, setNewCameraName] = useState('');
   const [newCameraLabel, setNewCameraLabel] = useState('');
   const [newCameraIsEntryPoint, setNewCameraIsEntryPoint] = useState(false);
+  const [newCameraPos, setNewCameraPos] = useState<{ x: number; y: number; angle?: number } | null>(null);
+  const [floorPlans, setFloorPlans] = useState<FloorPlan[]>([]);
+  const [activeFloorPlan, setActiveFloorPlan] = useState<FloorPlan | null>(null);
+  const [floorPlanLines, setFloorPlanLines] = useState<SpatialLine[]>([]);
   const cameraCarouselRef = React.useRef<HTMLDivElement>(null);
 
   const scrollCameraCarousel = (direction: 'left' | 'right') => {
@@ -314,13 +326,14 @@ function VigilensAPAMainContent() {
     return `${hrs}h ${remMins > 0 ? `${remMins}m` : ''}`;
   };
 
-  // Load initial camera and recent video data
+  // Load initial camera, recent video data, and floor plans
   const fetchTopologyData = async () => {
     try {
-      const [cRes, lRes, uRes] = await Promise.all([
+      const [cRes, lRes, uRes, fpRes] = await Promise.all([
         listCameraNodes(),
         listCameraNodeLinks(),
         listGalleryMedia('video'),
+        listFloorPlans(),
       ]);
       if (cRes?.data) setCameraNodes(cRes.data);
       if (lRes?.data) setCameraLinks(lRes.data);
@@ -328,8 +341,52 @@ function VigilensAPAMainContent() {
       if (cRes?.data && cRes.data.length > 0 && !selectedCameraId) {
         setSelectedCameraId(cRes.data[0].id);
       }
+      if (fpRes?.data && fpRes.data.length > 0) {
+        setFloorPlans(fpRes.data);
+        const defaultFp = fpRes.data[0];
+        setActiveFloorPlan(defaultFp);
+        const layoutRes = await getFloorPlanLayout(defaultFp.id);
+        if (layoutRes?.data) {
+          setFloorPlanLines(layoutRes.data.lines || []);
+          if (layoutRes.data.camera_nodes && layoutRes.data.camera_nodes.length > 0) {
+            const nodeMap = new Map(layoutRes.data.camera_nodes.map((n) => [n.id, n]));
+            setCameraNodes((prev) => prev.map((c) => nodeMap.get(c.id) || c));
+          }
+        }
+      }
     } catch {
       // Non-blocking
+    }
+  };
+
+  // Bulk save spatial floor plan layout (camera coordinates + walls + corridors)
+  const handleSaveFloorPlanLayout = async (data: SaveLayoutRequest) => {
+    try {
+      let targetFpId = activeFloorPlan?.id;
+      if (!targetFpId) {
+        const createRes = await createFloorPlan({ name: 'Default Campus Floor Plan' });
+        if (createRes?.data) {
+          targetFpId = createRes.data.id;
+          setActiveFloorPlan(createRes.data);
+          setFloorPlans((prev) => [createRes.data, ...prev]);
+        }
+      }
+      if (!targetFpId) {
+        toast.error('Could not locate or initialize floor plan');
+        return;
+      }
+
+      const res = await saveFloorPlanLayout(targetFpId, data);
+      if (res?.data) {
+        toast.success('Floor plan layout saved successfully!');
+        setFloorPlanLines(res.data.lines || []);
+        if (res.data.camera_nodes && res.data.camera_nodes.length > 0) {
+          const nodeMap = new Map(res.data.camera_nodes.map((n) => [n.id, n]));
+          setCameraNodes((prev) => prev.map((c) => nodeMap.get(c.id) || c));
+        }
+      }
+    } catch (err: any) {
+      toast.error(err?.message || 'Failed to save floor plan layout');
     }
   };
 
@@ -462,15 +519,25 @@ function VigilensAPAMainContent() {
         location_label: labelValue,
         location_desc: labelValue,
         is_entry_point: newCameraIsEntryPoint,
+        x_coord: newCameraPos ? (newCameraPos.x > 1 ? newCameraPos.x / 100 : newCameraPos.x) : undefined,
+        y_coord: newCameraPos ? (newCameraPos.y > 1 ? newCameraPos.y / 100 : newCameraPos.y) : undefined,
+        fov_angle: newCameraPos ? newCameraPos.angle : undefined,
       });
       if (res?.data) {
         toast.success(`Created camera: ${res.data.name}`);
-        setCameraNodes((prev) => [res.data, ...prev]);
+        const defaultCam: CameraNode = {
+          ...res.data,
+          x_coord: res.data.x_coord ?? (newCameraPos ? (newCameraPos.x > 1 ? newCameraPos.x / 100 : newCameraPos.x) : 0.5),
+          y_coord: res.data.y_coord ?? (newCameraPos ? (newCameraPos.y > 1 ? newCameraPos.y / 100 : newCameraPos.y) : 0.5),
+          fov_angle: res.data.fov_angle ?? (newCameraPos ? newCameraPos.angle : 0),
+        };
+        setCameraNodes((prev) => [defaultCam, ...prev]);
         setSelectedCameraId(res.data.id);
         setIsCreatingCamera(false);
         setNewCameraName('');
         setNewCameraLabel('');
         setNewCameraIsEntryPoint(false);
+        setNewCameraPos(null);
       }
     } catch (err: any) {
       toast.error(err?.message || 'Failed to create camera');
@@ -667,7 +734,7 @@ function VigilensAPAMainContent() {
         const session = res.data[0];
         setActiveSessionId(session.id);
         setSessionData(session);
-        setActiveStep(2);
+        setActiveStep(3);
         setShowLineCanvas(false);
         toast.success('Video processing session queued!');
       } else {
@@ -680,9 +747,9 @@ function VigilensAPAMainContent() {
     }
   };
 
-  // Polling for active session in Step 2
+  // Polling for active session in Step 3 (Processing Engine)
   useEffect(() => {
-    if (!activeSessionId || activeStep !== 2) return;
+    if (!activeSessionId || activeStep !== 3) return;
 
     const interval = setInterval(async () => {
       try {
@@ -692,7 +759,7 @@ function VigilensAPAMainContent() {
           const currentStatus = (res.data.status || '').toUpperCase();
           if (currentStatus === 'COMPLETED') {
             toast.success('Video processing completed!');
-            setActiveStep(3);
+            setActiveStep(4);
             fetchDetectedPeople(activeSessionId);
             clearInterval(interval);
           } else if (currentStatus === 'FAILED') {
@@ -729,14 +796,14 @@ function VigilensAPAMainContent() {
     setSessionData(session);
     const status = (session.status || '').toUpperCase();
     if (status === 'COMPLETED') {
-      setActiveStep(3);
+      setActiveStep(4);
       fetchDetectedPeople(session.id);
       toast.success(`Loaded session "${session.video_name}"`);
     } else if (status === 'PROCESSING' || status === 'PENDING' || status === 'QUEUED') {
-      setActiveStep(2);
+      setActiveStep(3);
       toast.success(`Tracking live processing for "${session.video_name}"`);
     } else {
-      setActiveStep(2);
+      setActiveStep(3);
       toast.error(`Session status: ${session.status}`);
     }
     setMainTab('analytics');
@@ -751,7 +818,7 @@ function VigilensAPAMainContent() {
         toast.success(`Rerunning analysis for "${session.video_name}"...`);
         setActiveSessionId(session.id);
         setSessionData(res.data);
-        setActiveStep(2);
+        setActiveStep(3);
         setMainTab('analytics');
       } else {
         toast.error(res?.message || 'Failed to rerun session');
@@ -861,415 +928,351 @@ function VigilensAPAMainContent() {
     }
   };
 
+  const isFloorPlanCanvasMode =
+    mainTab === 'analytics' &&
+    !selectedPersonForJourney &&
+    activeStep === 1 &&
+    topologyViewMode === 'floorplan';
+
+  const sessionStatus = (sessionData?.status || '').toUpperCase();
+  const isCompleted = sessionStatus === 'COMPLETED';
+  const isRunning =
+    sessionStatus === 'PROCESSING' ||
+    sessionStatus === 'PENDING' ||
+    sessionStatus === 'QUEUED';
+  const isStep3Disabled = !activeSessionId || isCompleted;
+  const isStep4Available = isCompleted;
+
+  const renderCompactPipelineStepper = () => (
+    <div className="inline-flex items-center gap-1 p-0.5 bg-muted/40 dark:bg-accent/20 border border-border/70 rounded-xl shadow-2xs shrink-0 overflow-x-auto max-w-full">
+      {/* 1. Spatial Studio */}
+      <button
+        type="button"
+        onClick={() => setActiveStep(1)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all cursor-pointer ${
+          activeStep === 1
+            ? 'bg-primary text-primary-foreground font-bold shadow-xs'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/60 font-semibold'
+        }`}
+      >
+        <Layers className="h-3.5 w-3.5 shrink-0" />
+        <span className="whitespace-nowrap">1. Spatial Studio</span>
+      </button>
+
+      {/* 2. Footage */}
+      <button
+        type="button"
+        onClick={() => setActiveStep(2)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all cursor-pointer ${
+          activeStep === 2
+            ? 'bg-primary text-primary-foreground font-bold shadow-xs'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/60 font-semibold'
+        }`}
+      >
+        <Sliders className="h-3.5 w-3.5 shrink-0" />
+        <span className="whitespace-nowrap">2. Footage</span>
+      </button>
+
+      {/* 3. Processing */}
+      <button
+        type="button"
+        onClick={() => !isStep3Disabled && setActiveStep(3)}
+        disabled={isStep3Disabled}
+        title={
+          isCompleted
+            ? 'Video is already processed. View results in Dashboard Stream (Step 4).'
+            : !activeSessionId
+            ? 'No active processing job'
+            : 'View processing engine progress'
+        }
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all ${
+          activeStep === 3
+            ? 'bg-primary text-primary-foreground font-bold shadow-xs cursor-pointer'
+            : isStep3Disabled
+            ? 'opacity-40 cursor-not-allowed text-muted-foreground'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/60 font-semibold cursor-pointer'
+        }`}
+      >
+        {isCompleted ? (
+          <Check className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
+        ) : (
+          <RefreshCw className={`h-3.5 w-3.5 shrink-0 ${activeStep === 3 || isRunning ? 'animate-spin' : ''}`} />
+        )}
+        <span className="whitespace-nowrap">3. Processing</span>
+        {isRunning && activeStep !== 3 && (
+          <span className="h-1.5 w-1.5 rounded-full bg-amber-400 animate-ping ml-0.5" />
+        )}
+      </button>
+
+      {/* 4. Stream */}
+      <button
+        type="button"
+        onClick={() => isStep4Available && setActiveStep(4)}
+        disabled={!isStep4Available}
+        title={
+          isStep4Available
+            ? 'View analysis results and live stream'
+            : 'Awaiting video processing completion'
+        }
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs transition-all ${
+          activeStep === 4
+            ? 'bg-primary text-primary-foreground font-bold shadow-xs cursor-pointer'
+            : !isStep4Available
+            ? 'opacity-40 cursor-not-allowed text-muted-foreground'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent/60 font-semibold cursor-pointer'
+        }`}
+      >
+        <Activity className="h-3.5 w-3.5 shrink-0" />
+        <span className="whitespace-nowrap">4. Stream</span>
+        {isStep4Available && activeStep !== 4 && (
+          <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 ml-0.5" />
+        )}
+      </button>
+    </div>
+  );
+
   return (
-    <div className="max-w-7xl mx-auto p-6 md:p-8 space-y-6">
+    <div
+      className={
+        isFloorPlanCanvasMode
+          ? 'h-full w-full p-2 md:p-2.5 flex flex-col min-h-0 overflow-hidden'
+          : 'max-w-7xl mx-auto px-4 sm:px-6 pt-2 pb-6 space-y-3'
+      }
+    >
       {/* ========================================================= */}
       {/* TAB 1: VIDEO ANALYTICS (With 3 Sub-Tabs: Topology | Processing | Results) */}
       {/* ========================================================= */}
       {mainTab === 'analytics' && !selectedPersonForJourney && (
-        <div className="space-y-6">
-          {/* Sub-tabs Stepper Header (Evenly Distributed, Compact 3-Stage Pipeline Bar) */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-2.5 p-1 bg-card/60 border border-border/80 rounded-xl shadow-xs backdrop-blur-sm">
-            {/* Stage 1: Topology & Setup */}
-            <button
-              type="button"
-              onClick={() => setActiveStep(1)}
-              className={`flex items-center justify-between px-3.5 py-2 rounded-lg transition-all cursor-pointer text-left border ${
-                activeStep === 1
-                  ? 'bg-primary text-primary-foreground shadow-sm border-primary font-bold'
-                  : 'bg-card/40 border-border/60 hover:bg-accent/60 text-foreground hover:border-border'
+        <div
+          className={
+            isFloorPlanCanvasMode
+              ? 'flex flex-col flex-1 h-full min-h-0 space-y-2 overflow-hidden'
+              : 'space-y-3'
+          }
+        >
+          {/* STEP 1 TOP TOOLBAR (Compact Stages + View Switcher + Actions) */}
+          {activeStep === 1 && (
+            <div
+              className={`flex flex-wrap items-center justify-between gap-2 border border-border/80 rounded-xl shadow-xs shrink-0 ${
+                isFloorPlanCanvasMode ? 'p-1.5 bg-card/70 backdrop-blur-md' : 'p-1.5 sm:p-2 bg-card'
               }`}
             >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-lg shrink-0 ${
-                    activeStep === 1
-                      ? 'bg-white/20 text-white'
-                      : 'bg-primary/10 text-primary border border-primary/20'
-                  }`}
-                >
-                  <Sliders className="h-3.5 w-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[9px] font-extrabold uppercase tracking-wider opacity-80">
-                      Step 1
-                    </span>
-                    <span className="text-xs font-bold truncate">Topology & Setup</span>
-                  </div>
-                  <p className={`text-[10px] truncate leading-tight ${activeStep === 1 ? 'text-white/80' : 'text-muted-foreground'}`}>
-                    Cameras & footage upload
-                  </p>
-                </div>
-              </div>
-              {activeStep === 1 && (
-                <span className="shrink-0 text-[9px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold ml-1">
-                  Active
-                </span>
-              )}
-            </button>
+              {/* Left: Compact Pipeline Stepper */}
+              {renderCompactPipelineStepper()}
 
-            {/* Stage 2: Processing Engine (Disabled once Video is COMPLETED) */}
-            {(() => {
-              const sessionStatus = (sessionData?.status || '').toUpperCase();
-              const isCompleted = sessionStatus === 'COMPLETED';
-              const isRunning = sessionStatus === 'PROCESSING' || sessionStatus === 'PENDING' || sessionStatus === 'QUEUED';
-              const isStep2Disabled = !activeSessionId || isCompleted;
+              {/* Right: View Switcher & Topology Actions */}
+              <div className="flex items-center gap-2">
+                <div className="flex items-center rounded-lg border border-border bg-accent/30 p-0.5 text-xs">
+                  <button
+                    type="button"
+                    onClick={() => setTopologyViewMode('floorplan')}
+                    className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
+                      topologyViewMode === 'floorplan'
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Floor Plan Canvas
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTopologyViewMode('graph')}
+                    className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
+                      topologyViewMode === 'graph'
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    Visual Graph
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTopologyViewMode('list')}
+                    className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
+                      topologyViewMode === 'list'
+                        ? 'bg-primary text-primary-foreground shadow-sm'
+                        : 'text-muted-foreground hover:text-foreground'
+                    }`}
+                  >
+                    List Cards
+                  </button>
+                </div>
 
-              return (
                 <button
                   type="button"
-                  onClick={() => !isStep2Disabled && setActiveStep(2)}
-                  disabled={isStep2Disabled}
-                  title={
-                    isCompleted
-                      ? 'Video is already processed. View results in Dashboard Stream (Step 3).'
-                      : !activeSessionId
-                      ? 'No active processing job'
-                      : 'View processing engine progress'
-                  }
-                  className={`flex items-center justify-between px-3.5 py-2 rounded-lg transition-all text-left border ${
-                    isStep2Disabled
-                      ? isCompleted
-                        ? 'opacity-60 cursor-not-allowed border-border/40 bg-card/20'
-                        : 'opacity-40 cursor-not-allowed border-border/40 bg-card/20'
-                      : activeStep === 2
-                      ? 'bg-primary text-primary-foreground shadow-sm border-primary font-bold cursor-pointer'
-                      : 'bg-card/40 border-border/60 hover:bg-accent/60 text-foreground hover:border-border cursor-pointer'
-                  }`}
+                  onClick={() => setIsCreatingCamera(true)}
+                  className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/40 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-accent cursor-pointer"
                 >
-                  <div className="flex items-center gap-2.5 min-w-0">
-                    <div
-                      className={`flex h-7 w-7 items-center justify-center rounded-lg shrink-0 ${
-                        activeStep === 2
-                          ? 'bg-white/20 text-white'
-                          : isCompleted
-                          ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20'
-                          : isRunning
-                          ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
-                          : 'bg-accent text-muted-foreground border border-border'
-                      }`}
-                    >
-                      {isCompleted ? (
-                        <Check className="h-3.5 w-3.5 text-emerald-400" />
-                      ) : (
-                        <RefreshCw className={`h-3.5 w-3.5 ${activeStep === 2 || isRunning ? 'animate-spin' : ''}`} />
-                      )}
-                    </div>
-                    <div className="min-w-0">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-[9px] font-extrabold uppercase tracking-wider opacity-80">
-                          Step 2
-                        </span>
-                        <span className="text-xs font-bold truncate">Processing Engine</span>
-                      </div>
-                      <p className={`text-[10px] truncate leading-tight ${activeStep === 2 ? 'text-white/80' : 'text-muted-foreground'}`}>
-                        {isCompleted
-                          ? 'Processing finished'
-                          : isRunning
-                          ? 'Active detection & ReID'
-                          : activeSessionId
-                          ? 'Pipeline progress'
-                          : 'Pending upload'}
-                      </p>
-                    </div>
-                  </div>
-                  {activeStep === 2 ? (
-                    <span className="shrink-0 text-[9px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold ml-1">
-                      Active
-                    </span>
-                  ) : isCompleted ? (
-                    <span className="shrink-0 text-[9px] bg-emerald-500/10 text-emerald-400 px-1.5 py-0.2 rounded-full font-bold border border-emerald-500/20 ml-1">
-                      Finished
-                    </span>
-                  ) : isRunning ? (
-                    <span className="shrink-0 text-[9px] bg-amber-500/20 text-amber-400 px-1.5 py-0.2 rounded-full font-bold animate-pulse border border-amber-500/30 ml-1">
-                      Running
-                    </span>
-                  ) : null}
+                  <Plus className="h-3.5 w-3.5 text-primary" /> Add Camera
                 </button>
-              );
-            })()}
-
-            {/* Stage 3: Dashboard Stream (Results) */}
-            <button
-              type="button"
-              onClick={() => (sessionData?.status || '').toUpperCase() === 'COMPLETED' && setActiveStep(3)}
-              disabled={(sessionData?.status || '').toUpperCase() !== 'COMPLETED'}
-              className={`flex items-center justify-between px-3.5 py-2 rounded-lg transition-all text-left border ${
-                (sessionData?.status || '').toUpperCase() !== 'COMPLETED'
-                  ? 'opacity-40 cursor-not-allowed border-border/40 bg-card/20'
-                  : activeStep === 3
-                  ? 'bg-primary text-primary-foreground shadow-sm border-primary font-bold cursor-pointer'
-                  : 'bg-card/40 border-border/60 hover:bg-accent/60 text-foreground hover:border-border cursor-pointer'
-              }`}
-            >
-              <div className="flex items-center gap-2.5 min-w-0">
-                <div
-                  className={`flex h-7 w-7 items-center justify-center rounded-lg shrink-0 ${
-                    activeStep === 3
-                      ? 'bg-white/20 text-white'
-                      : (sessionData?.status || '').toUpperCase() === 'COMPLETED'
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
-                      : 'bg-accent text-muted-foreground border border-border'
-                  }`}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setLinkFromCameraId(selectedCameraId || (cameraNodes[0]?.id ?? ''));
+                    setLinkToCameraId(cameraNodes.find((c) => c.id !== selectedCameraId)?.id ?? '');
+                    setIsCreatingLink(true);
+                  }}
+                  disabled={cameraNodes.length < 2}
+                  className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
                 >
-                  <Activity className="h-3.5 w-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-[9px] font-extrabold uppercase tracking-wider opacity-80">
-                      Step 3
-                    </span>
-                    <span className="text-xs font-bold truncate">Dashboard Stream</span>
-                  </div>
-                  <p className={`text-[10px] truncate leading-tight ${activeStep === 3 ? 'text-white/80' : 'text-muted-foreground'}`}>
-                    {(sessionData?.status || '').toUpperCase() === 'COMPLETED'
-                      ? 'Results & journeys'
-                      : 'Awaiting completion'}
-                  </p>
-                </div>
+                  <GitFork className="h-3.5 w-3.5" /> Connect Cameras
+                </button>
               </div>
-              {activeStep === 3 ? (
-                <span className="shrink-0 text-[9px] bg-white/20 px-1.5 py-0.2 rounded-full font-bold ml-1">
-                  Active
-                </span>
-              ) : (sessionData?.status || '').toUpperCase() === 'COMPLETED' ? (
-                <span className="shrink-0 text-[9px] bg-emerald-500/20 text-emerald-400 px-1.5 py-0.2 rounded-full font-bold border border-emerald-500/30 ml-1">
-                  Ready
-                </span>
-              ) : null}
-            </button>
-          </div>
+            </div>
+          )}
 
           {/* SUB-TAB 1: TOPOLOGY GRAPH, CAMERA LIST & VIDEO UPLOAD */}
           {activeStep === 1 && (
-            <div className="space-y-6">
-              {/* Camera-to-Camera Topology Network Manager */}
-              <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
-                  <div>
-                    <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
-                      <Route className="h-5 w-5 text-primary" /> Camera-to-Camera Spatial Topology Graph
-                    </h3>
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      Define spatial connections and expected travel times between cameras (supports 1-to-many, e.g., Workspace ➔ Cafeteria, Meeting Room, Cabins)
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    {/* View Switcher: Graph vs List */}
-                    <div className="flex items-center rounded-lg border border-border bg-accent/30 p-0.5 text-xs">
+            isFloorPlanCanvasMode ? (
+              /* SPATIAL FLOOR PLAN CANVAS VIEW (Flush to Screen, 100% Height, Sticking Absolute) */
+              <div className="flex-1 min-h-0 h-full w-full flex flex-col overflow-hidden">
+                <FloorPlanCanvas
+                  cameras={cameraNodes}
+                  links={cameraLinks}
+                  floorPlan={activeFloorPlan}
+                  initialLines={floorPlanLines}
+                  selectedCameraId={selectedCameraId}
+                  onSelectCamera={(cam) => setSelectedCameraId(cam?.id || '')}
+                  onAddCameraAtPos={(x, y, angle) => {
+                    setNewCameraName(`Camera ${cameraNodes.length + 1}`);
+                    setNewCameraPos({ x, y, angle });
+                    setIsCreatingCamera(true);
+                  }}
+                  onUpdateCameraPos={(camId, x, y) => {
+                    setCameraNodes((prev) =>
+                      prev.map((c) => (c.id === camId ? { ...c, x_coord: x, y_coord: y } : c))
+                    );
+                  }}
+                  onUpdateCameraAngle={(camId, angle) => {
+                    setCameraNodes((prev) =>
+                      prev.map((c) => (c.id === camId ? { ...c, fov_angle: angle } : c))
+                    );
+                  }}
+                  onQuickConnect={(fromId, toId) => {
+                    setLinkFromCameraId(fromId);
+                    setLinkToCameraId(toId);
+                    setIsCreatingLink(true);
+                  }}
+                  onDeleteLink={handleDeleteCameraLink}
+                  onDeleteCamera={(id) => {
+                    const target = cameraNodes.find((c) => c.id === id);
+                    if (target) setCameraToDelete(target);
+                  }}
+                  onSaveLayout={handleSaveFloorPlanLayout}
+                />
+              </div>
+            ) : (
+              <div className="space-y-6">
+                {/* Camera-to-Camera Topology Network Manager */}
+                <div className="rounded-xl border border-border bg-card p-6 shadow-sm space-y-4">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-border pb-4">
+                    <div>
+                      <h3 className="flex items-center gap-2 text-base font-semibold text-foreground">
+                        <Route className="h-5 w-5 text-primary" /> Camera-to-Camera Spatial Topology Graph
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        Define spatial connections and expected travel times between cameras (supports 1-to-many, e.g., Workspace ➔ Cafeteria, Meeting Room, Cabins)
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      {/* View Switcher: Floor Plan vs Visual Graph vs List */}
+                      <div className="flex items-center rounded-lg border border-border bg-accent/30 p-0.5 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setTopologyViewMode('floorplan')}
+                          className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
+                            topologyViewMode === 'floorplan'
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          Floor Plan Canvas
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTopologyViewMode('graph')}
+                          className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
+                            topologyViewMode === 'graph'
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                          title="Show connected cameras graph"
+                        >
+                          Visual Graph (Connected Cameras)
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTopologyViewMode('list')}
+                          className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
+                            topologyViewMode === 'list'
+                              ? 'bg-primary text-primary-foreground shadow-sm'
+                              : 'text-muted-foreground hover:text-foreground'
+                          }`}
+                        >
+                          List Cards
+                        </button>
+                      </div>
+
                       <button
                         type="button"
-                        onClick={() => setTopologyViewMode('graph')}
-                        className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
-                          topologyViewMode === 'graph'
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
+                        onClick={() => setIsCreatingCamera(true)}
+                        className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/40 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent cursor-pointer"
                       >
-                        Visual Graph
+                        <Plus className="h-3.5 w-3.5 text-primary" /> Add Camera
                       </button>
                       <button
                         type="button"
-                        onClick={() => setTopologyViewMode('list')}
-                        className={`rounded-md px-2.5 py-1 font-semibold transition-all cursor-pointer ${
-                          topologyViewMode === 'list'
-                            ? 'bg-primary text-primary-foreground shadow-sm'
-                            : 'text-muted-foreground hover:text-foreground'
-                        }`}
+                        onClick={() => {
+                          setLinkFromCameraId(selectedCameraId || (cameraNodes[0]?.id ?? ''));
+                          setLinkToCameraId(cameraNodes.find((c) => c.id !== selectedCameraId)?.id ?? '');
+                          setIsCreatingLink(true);
+                        }}
+                        disabled={cameraNodes.length < 2}
+                        className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
                       >
-                        List Cards
+                        <GitFork className="h-3.5 w-3.5" /> Connect Cameras
                       </button>
                     </div>
-
-                    <button
-                      type="button"
-                      onClick={() => setIsCreatingCamera(true)}
-                      className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/40 px-3 py-1.5 text-xs font-semibold text-foreground hover:bg-accent cursor-pointer"
-                    >
-                      <Plus className="h-3.5 w-3.5 text-primary" /> Add Camera
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setLinkFromCameraId(selectedCameraId || (cameraNodes[0]?.id ?? ''));
-                        setLinkToCameraId(cameraNodes.find((c) => c.id !== selectedCameraId)?.id ?? '');
-                        setIsCreatingLink(true);
-                      }}
-                      disabled={cameraNodes.length < 2}
-                      className="flex items-center gap-1.5 rounded-lg bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-40 cursor-pointer"
-                    >
-                      <GitFork className="h-3.5 w-3.5" /> Connect Cameras
-                    </button>
                   </div>
-                </div>
 
-                {/* Add Camera Node Modal / Form */}
-                {isCreatingCamera && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                    <div className="flex justify-between items-center">
-                      <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <Camera className="h-4 w-4 text-primary" /> Create New Camera Node
-                      </h4>
-                      <button onClick={() => setIsCreatingCamera(false)} className="text-muted-foreground hover:text-foreground">
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <input
-                        type="text"
-                        placeholder="Camera Name (e.g. Open Workspace, Cafeteria, Lobby)"
-                        value={newCameraName}
-                        onChange={(e) => setNewCameraName(e.target.value)}
-                        className="rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                      <input
-                        type="text"
-                        placeholder="Location Label (e.g. Ground Floor, West Wing)"
-                        value={newCameraLabel}
-                        onChange={(e) => setNewCameraLabel(e.target.value)}
-                        className="rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                      />
-                    </div>
-                    <div className="flex items-center justify-between pt-1">
-                      <label className="flex items-center gap-1.5 text-xs font-semibold text-foreground cursor-pointer select-none">
-                        <input
-                          type="checkbox"
-                          checked={newCameraIsEntryPoint}
-                          onChange={(e) => setNewCameraIsEntryPoint(e.target.checked)}
-                          className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
-                        />
-                        <span>Is Campus Entry / Exit Point</span>
-                      </label>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsCreatingCamera(false)}
-                          className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCreateCamera}
-                          className="rounded-md bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 cursor-pointer"
-                        >
-                          Save Camera
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
 
-                {/* Connect Cameras Modal / Form */}
-                {isCreatingLink && (
-                  <div className="rounded-xl border border-primary/30 bg-primary/5 p-4 space-y-3">
-                    <div className="flex justify-between items-center">
-                      <h4 className="text-xs font-bold text-foreground flex items-center gap-1.5">
-                        <GitFork className="h-4 w-4 text-primary" /> Create Camera-to-Camera Connection Edge
-                      </h4>
-                      <button onClick={() => setIsCreatingLink(false)} className="text-muted-foreground hover:text-foreground">
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1 block">Origin Camera</label>
-                        <select
-                          value={linkFromCameraId}
-                          onChange={(e) => setLinkFromCameraId(e.target.value)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="">-- Select Origin Camera --</option>
-                          {cameraNodes.map((n) => (
-                            <option key={n.id} value={n.id}>📷 {n.name} {n.location_label ? `(${n.location_label})` : ''}</option>
-                          ))}
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1 block">Destination Camera</label>
-                        <select
-                          value={linkToCameraId}
-                          onChange={(e) => setLinkToCameraId(e.target.value)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
-                        >
-                          <option value="">-- Select Destination Camera --</option>
-                          {cameraNodes.filter((n) => n.id !== linkFromCameraId).map((n) => (
-                            <option key={n.id} value={n.id}>📷 {n.name} {n.location_label ? `(${n.location_label})` : ''}</option>
-                          ))}
-                        </select>
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3 pt-2">
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1 block">Min Transit (sec)</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={linkMinTransit}
-                          onChange={(e) => setLinkMinTransit(parseFloat(e.target.value) || 1)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1 block">Avg Transit (sec)</label>
-                        <input
-                          type="number"
-                          min="1"
-                          value={linkAvgTransit}
-                          onChange={(e) => setLinkAvgTransit(parseFloat(e.target.value) || 1)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground"
-                        />
-                      </div>
-                      <div>
-                        <label className="text-xs font-medium text-muted-foreground mb-1 block">Max Transit (sec)</label>
-                        <input
-                          type="number"
-                          min="5"
-                          value={linkMaxTransit}
-                          onChange={(e) => setLinkMaxTransit(parseFloat(e.target.value) || 5)}
-                          className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex items-center justify-between pt-2">
-                      <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={linkBidirectional}
-                          onChange={(e) => setLinkBidirectional(e.target.checked)}
-                          className="h-4 w-4 rounded border-input text-primary accent-primary"
-                        />
-                        <span className="flex items-center gap-1">
-                          <ArrowLeftRight className="h-3.5 w-3.5 text-primary" /> Bidirectional (Create two-way link A ⇄ B)
-                        </span>
-                      </label>
-
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsCreatingLink(false)}
-                          className="rounded-md border border-border px-3 py-1.5 text-xs text-muted-foreground hover:bg-accent"
-                        >
-                          Cancel
-                        </button>
-                        <button
-                          type="button"
-                          onClick={handleCreateCameraLink}
-                          className="rounded-md bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 cursor-pointer"
-                        >
-                          Save Connection
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* VISUAL TOPOLOGY GRAPH VIEW (Default) */}
-                {topologyViewMode === 'graph' ? (
+                {/* SPATIAL FLOOR PLAN CANVAS VIEW */}
+                {topologyViewMode === 'floorplan' ? (
+                  <FloorPlanCanvas
+                    cameras={cameraNodes}
+                    links={cameraLinks}
+                    floorPlan={activeFloorPlan}
+                    initialLines={floorPlanLines}
+                    selectedCameraId={selectedCameraId}
+                    onSelectCamera={(cam) => setSelectedCameraId(cam?.id || '')}
+                    onAddCameraAtPos={(x, y, angle) => {
+                      setNewCameraName(`Camera ${cameraNodes.length + 1}`);
+                      setNewCameraPos({ x, y, angle });
+                      setIsCreatingCamera(true);
+                    }}
+                    onUpdateCameraPos={(camId, x, y) => {
+                      setCameraNodes((prev) =>
+                        prev.map((c) => (c.id === camId ? { ...c, x_coord: x, y_coord: y } : c))
+                      );
+                    }}
+                    onUpdateCameraAngle={(camId, angle) => {
+                      setCameraNodes((prev) =>
+                        prev.map((c) => (c.id === camId ? { ...c, fov_angle: angle } : c))
+                      );
+                    }}
+                    onQuickConnect={(fromId, toId) => {
+                      setLinkFromCameraId(fromId);
+                      setLinkToCameraId(toId);
+                      setIsCreatingLink(true);
+                    }}
+                    onDeleteLink={handleDeleteCameraLink}
+                    onDeleteCamera={(id) => {
+                      const target = cameraNodes.find((c) => c.id === id);
+                      if (target) setCameraToDelete(target);
+                    }}
+                    onSaveLayout={handleSaveFloorPlanLayout}
+                  />
+                ) : topologyViewMode === 'graph' ? (
                   <CameraTopologyGraph
                     cameraNodes={cameraNodes}
                     cameraLinks={cameraLinks}
@@ -1462,6 +1465,251 @@ function VigilensAPAMainContent() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              {/* Bottom Step 1 Action Banner */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 rounded-2xl border border-primary/30 bg-primary/5 shadow-xs">
+                <div>
+                  <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
+                    <CheckCircle className="h-4 w-4 text-emerald-400" />
+                    Campus Spatial Studio Configured
+                  </h4>
+                  <p className="text-xs text-muted-foreground mt-0.5">
+                    Your floor plan walls, corridors, and camera pins are set up. Proceed to choose video footage and adjust detection parameters.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setActiveStep(2)}
+                  className="w-full sm:w-auto flex items-center justify-center gap-2 rounded-xl bg-primary px-5 py-2.5 text-xs font-bold text-primary-foreground hover:bg-primary/90 transition-all shadow-md shadow-primary/20 cursor-pointer shrink-0"
+                >
+                  <span>Proceed to Video & Analysis</span>
+                  <ArrowRight className="h-4 w-4" />
+                </button>
+              </div>
+            </div>
+          )
+        )}
+
+        {/* Floating Modal: Create Camera Node */}
+        {isCreatingCamera && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4">
+              <div className="flex justify-between items-center border-b border-border pb-3">
+                <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <Camera className="h-4 w-4 text-primary" /> Create New Camera Node
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingCamera(false)}
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1 block">Camera Name</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Open Workspace, Cafeteria"
+                    value={newCameraName}
+                    onChange={(e) => setNewCameraName(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-foreground mb-1 block">Location Label</label>
+                  <input
+                    type="text"
+                    placeholder="e.g. Ground Floor, West Wing"
+                    value={newCameraLabel}
+                    onChange={(e) => setNewCameraLabel(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-border">
+                <label className="flex items-center gap-1.5 text-xs font-semibold text-foreground cursor-pointer select-none">
+                  <input
+                    type="checkbox"
+                    checked={newCameraIsEntryPoint}
+                    onChange={(e) => setNewCameraIsEntryPoint(e.target.checked)}
+                    className="h-4 w-4 rounded border-input text-primary focus:ring-primary"
+                  />
+                  <span>Is Campus Entry / Exit Point</span>
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingCamera(false)}
+                    className="rounded-lg border border-border px-3.5 py-1.5 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateCamera}
+                    className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-xs"
+                  >
+                    Save Camera
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Floating Modal: Connect Cameras */}
+        {isCreatingLink && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4 animate-in fade-in duration-150">
+            <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-5 shadow-2xl space-y-4">
+              <div className="flex justify-between items-center border-b border-border pb-3">
+                <h4 className="text-sm font-bold text-foreground flex items-center gap-2">
+                  <GitFork className="h-4 w-4 text-primary" /> Create Camera Connection Edge
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setIsCreatingLink(false)}
+                  className="rounded-lg p-1 text-muted-foreground hover:bg-accent hover:text-foreground cursor-pointer"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Origin Camera</label>
+                  <select
+                    value={linkFromCameraId}
+                    onChange={(e) => setLinkFromCameraId(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">-- Select Origin Camera --</option>
+                    {cameraNodes.map((n) => (
+                      <option key={n.id} value={n.id}>📷 {n.name} {n.location_label ? `(${n.location_label})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-semibold text-muted-foreground mb-1 block">Destination Camera</label>
+                  <select
+                    value={linkToCameraId}
+                    onChange={(e) => setLinkToCameraId(e.target.value)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-2 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-primary"
+                  >
+                    <option value="">-- Select Destination Camera --</option>
+                    {cameraNodes.filter((n) => n.id !== linkFromCameraId).map((n) => (
+                      <option key={n.id} value={n.id}>📷 {n.name} {n.location_label ? `(${n.location_label})` : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Min Transit (sec)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={linkMinTransit}
+                    onChange={(e) => setLinkMinTransit(parseFloat(e.target.value) || 1)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Avg Transit (sec)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={linkAvgTransit}
+                    onChange={(e) => setLinkAvgTransit(parseFloat(e.target.value) || 1)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground"
+                  />
+                </div>
+                <div>
+                  <label className="text-[11px] font-medium text-muted-foreground mb-1 block">Max Transit (sec)</label>
+                  <input
+                    type="number"
+                    min="5"
+                    value={linkMaxTransit}
+                    onChange={(e) => setLinkMaxTransit(parseFloat(e.target.value) || 5)}
+                    className="w-full rounded-md border border-input bg-background px-3 py-1.5 text-xs text-foreground"
+                  />
+                </div>
+              </div>
+
+              <div className="flex items-center justify-between pt-2 border-t border-border">
+                <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={linkBidirectional}
+                    onChange={(e) => setLinkBidirectional(e.target.checked)}
+                    className="h-4 w-4 rounded border-input text-primary accent-primary"
+                  />
+                  <span className="flex items-center gap-1">
+                    <ArrowLeftRight className="h-3.5 w-3.5 text-primary" /> Bidirectional (A ⇄ B)
+                  </span>
+                </label>
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setIsCreatingLink(false)}
+                    className="rounded-lg border border-border px-3.5 py-1.5 text-xs text-muted-foreground hover:bg-accent cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleCreateCameraLink}
+                    className="rounded-lg bg-primary px-4 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 cursor-pointer shadow-xs"
+                  >
+                    Save Connection
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+          {/* SUB-TAB 2: VIDEO FOOTAGE UPLOAD & ANALYSIS PARAMETERS */}
+          {activeStep === 2 && (
+            <div className="space-y-3">
+              {/* Top Navigation & Target Camera Selection Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-1.5 sm:p-2 rounded-xl border border-border bg-card shadow-xs">
+                {/* Left: Back to Step 1 */}
+                <div className="flex items-center justify-start sm:flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep(1)}
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/30 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-accent transition-colors cursor-pointer w-fit"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5 text-primary" />
+                    <span>Back to Spatial Studio</span>
+                  </button>
+                </div>
+
+                {/* Center: 4 Compact Pipeline Stepper Tabs */}
+                <div className="flex items-center justify-center">
+                  {renderCompactPipelineStepper()}
+                </div>
+
+                {/* Right: Target Camera Selection */}
+                <div className="flex items-center justify-end gap-2 sm:flex-1">
+                  <span className="text-xs font-medium text-muted-foreground whitespace-nowrap">Target Camera:</span>
+                  <select
+                    value={selectedCameraId}
+                    onChange={(e) => setSelectedCameraId(e.target.value)}
+                    className="rounded-lg border border-input bg-background px-2.5 py-1 text-xs font-bold text-foreground focus:outline-none focus:ring-2 focus:ring-primary cursor-pointer"
+                  >
+                    <option value="">-- All Cameras / Auto --</option>
+                    {cameraNodes.map((cam) => (
+                      <option key={cam.id} value={cam.id}>
+                        📷 {cam.name} {cam.location_label ? `(${cam.location_label})` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               {/* Video Footage Upload & Parameter Configuration */}
@@ -1959,9 +2207,44 @@ function VigilensAPAMainContent() {
             </div>
           )}
 
-          {/* SUB-TAB 2: REAL-TIME PROCESSING QUEUE */}
-          {activeStep === 2 && (
-            <div className="rounded-2xl border border-border bg-card p-8 shadow-sm text-center space-y-6 max-w-2xl mx-auto">
+          {/* SUB-TAB 3: REAL-TIME PROCESSING QUEUE */}
+          {activeStep === 3 && (
+            <div className="space-y-3">
+              {/* Top Navigation & Status Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-1.5 sm:p-2 rounded-xl border border-border bg-card shadow-xs">
+                {/* Left: Back to Footage Setup */}
+                <div className="flex items-center justify-start sm:flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep(2)}
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/30 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-accent transition-colors cursor-pointer w-fit"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5 text-primary" />
+                    <span>Back to Footage Setup</span>
+                  </button>
+                </div>
+
+                {/* Center: 4 Compact Pipeline Stepper Tabs */}
+                <div className="flex items-center justify-center">
+                  {renderCompactPipelineStepper()}
+                </div>
+
+                {/* Right: Processing Status Badge */}
+                <div className="flex items-center justify-end sm:flex-1">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-semibold border bg-primary/10 text-primary border-primary/20">
+                    <RefreshCw className={`h-3.5 w-3.5 ${isRunning ? 'animate-spin' : ''}`} />
+                    <span>
+                      {isRunning
+                        ? 'Processing Running'
+                        : isCompleted
+                        ? 'Processing Completed'
+                        : 'Queue Standby'}
+                    </span>
+                  </span>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-border bg-card p-8 shadow-sm text-center space-y-6 max-w-2xl mx-auto">
               <div className="flex h-16 w-16 mx-auto items-center justify-center rounded-2xl bg-primary/10 text-primary animate-pulse">
                 <RefreshCw className="h-8 w-8 animate-spin" />
               </div>
@@ -2009,12 +2292,47 @@ function VigilensAPAMainContent() {
                 </div>
               </div>
             </div>
-          )}
+          </div>
+        )}
 
-          {/* SUB-TAB 3: DASHBOARD STREAM (RESULTS) */}
-          {activeStep === 3 && sessionData && (
-            <div className="space-y-6">
-              {/* Summary Metric Header */}
+          {/* SUB-TAB 4: DASHBOARD STREAM (RESULTS) */}
+          {activeStep === 4 && (
+            <div className="space-y-3">
+              {/* Top Navigation & Action Bar */}
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-1.5 sm:p-2 rounded-xl border border-border bg-card shadow-xs">
+                {/* Left: Back to Step 1 */}
+                <div className="flex items-center justify-start sm:flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep(1)}
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/30 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-accent transition-colors cursor-pointer w-fit"
+                  >
+                    <ArrowLeft className="h-3.5 w-3.5 text-primary" />
+                    <span>Back to Spatial Studio</span>
+                  </button>
+                </div>
+
+                {/* Center: 4 Compact Pipeline Stepper Tabs */}
+                <div className="flex items-center justify-center">
+                  {renderCompactPipelineStepper()}
+                </div>
+
+                {/* Right: New Upload Action */}
+                <div className="flex items-center justify-end sm:flex-1">
+                  <button
+                    type="button"
+                    onClick={() => setActiveStep(2)}
+                    className="flex items-center gap-1.5 rounded-lg border border-border bg-accent/30 px-2.5 py-1 text-xs font-semibold text-foreground hover:bg-accent cursor-pointer transition-colors"
+                  >
+                    <Sliders className="h-3.5 w-3.5 text-primary" />
+                    <span>New Upload / Re-run</span>
+                  </button>
+                </div>
+              </div>
+
+              {sessionData ? (
+                <>
+                  {/* Summary Metric Header */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                 <div className="rounded-2xl border border-border bg-card p-4 shadow-sm">
                   <span className="text-xs text-muted-foreground flex items-center gap-1.5">
@@ -2788,8 +3106,14 @@ function VigilensAPAMainContent() {
                   </div>
                 )}
               </div>
+            </>
+          ) : (
+            <div className="p-8 text-center text-muted-foreground bg-card rounded-2xl border border-border">
+              No processed session data found. Run video footage in Step 2 to generate results.
             </div>
           )}
+        </div>
+      )}
         </div>
       )}
 

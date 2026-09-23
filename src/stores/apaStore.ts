@@ -4,8 +4,8 @@ import { persist, createJSONStorage } from 'zustand/middleware';
 export interface ApaStoreState {
   // Navigation & Stepper
   mainTab: 'analytics' | 'people' | 'history';
-  activeStep: 1 | 2 | 3;
-  topologyViewMode: 'graph' | 'list';
+  activeStep: 1 | 2 | 3 | 4;
+  topologyViewMode: 'graph' | 'list' | 'floorplan';
   selectedJourneyDate: string;
 
   // Processing Parameters & Execution Toggles
@@ -43,17 +43,19 @@ export interface ApaStoreState {
   // Active Session & Results
   activeSessionId: string | null;
 
-  // Global Modals
+  // Global Modals & Layout
   isSearchByPhotoOpen: boolean;
   isDailyCheckinOpen: boolean;
+  isSidebarCollapsed: boolean | null; // null = auto (collapsed when canvas open), boolean = user manual override
 
   // Setters / Actions
   setMainTab: (tab: 'analytics' | 'people' | 'history') => void;
-  setActiveStep: (step: 1 | 2 | 3) => void;
-  setTopologyViewMode: (mode: 'graph' | 'list') => void;
+  setActiveStep: (step: 1 | 2 | 3 | 4) => void;
+  setTopologyViewMode: (mode: 'graph' | 'list' | 'floorplan') => void;
   setSelectedJourneyDate: (date: string) => void;
   setIsSearchByPhotoOpen: (open: boolean) => void;
   setIsDailyCheckinOpen: (open: boolean) => void;
+  setIsSidebarCollapsed: (val: boolean | null) => void;
 
   setSimilarityThreshold: (val: number) => void;
   setConfidenceThreshold: (val: number) => void;
@@ -93,7 +95,7 @@ export const useApaStore = create<ApaStoreState>()(
       // Defaults
       mainTab: 'analytics',
       activeStep: 1,
-      topologyViewMode: 'graph',
+      topologyViewMode: 'floorplan',
       selectedJourneyDate: 'all',
 
       // Execution Toggles & Hyperparameters
@@ -131,9 +133,10 @@ export const useApaStore = create<ApaStoreState>()(
       // Active Session
       activeSessionId: null,
 
-      // Global Modals
+      // Global Modals & Layout
       isSearchByPhotoOpen: false,
       isDailyCheckinOpen: false,
+      isSidebarCollapsed: null,
 
       // Actions
       setMainTab: (mainTab) => set({ mainTab }),
@@ -142,6 +145,7 @@ export const useApaStore = create<ApaStoreState>()(
       setSelectedJourneyDate: (selectedJourneyDate) => set({ selectedJourneyDate }),
       setIsSearchByPhotoOpen: (isSearchByPhotoOpen) => set({ isSearchByPhotoOpen }),
       setIsDailyCheckinOpen: (isDailyCheckinOpen) => set({ isDailyCheckinOpen }),
+      setIsSidebarCollapsed: (isSidebarCollapsed) => set({ isSidebarCollapsed }),
 
       setSimilarityThreshold: (similarityThreshold) => set({ similarityThreshold }),
       setConfidenceThreshold: (confidenceThreshold) => set({ confidenceThreshold }),
